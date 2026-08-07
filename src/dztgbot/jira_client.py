@@ -47,15 +47,22 @@ class JiraClient:
         base_url: str,
         verify_ssl: bool = True,
         timeout_seconds: float = 30,
+        vpn_manager: object | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_url = f"{self._base_url}/rest/api/2"
         self._verify_ssl = verify_ssl
         self._timeout_seconds = timeout_seconds
+        self._vpn_manager = vpn_manager
+
+    async def _ensure_vpn(self) -> None:
+        if self._vpn_manager is not None and hasattr(self._vpn_manager, "start"):
+            await self._vpn_manager.start()
 
     async def validate_credentials(self, pat: str) -> JiraUser:
         """Validate a PAT by calling /rest/api/2/myself.  Returns the user identity."""
 
+        await self._ensure_vpn()
         async with self._make_client(pat) as client:
             try:
                 response = await client.get(f"{self._api_url}/myself")
@@ -118,6 +125,7 @@ class JiraClient:
 
         payload = {"fields": fields}
 
+        await self._ensure_vpn()
         async with self._make_client(pat) as client:
             try:
                 response = await client.post(
@@ -177,6 +185,7 @@ class JiraClient:
         }
         payload = {"fields": fields}
 
+        await self._ensure_vpn()
         async with self._make_client(pat) as client:
             try:
                 response = await client.put(
@@ -229,6 +238,7 @@ class JiraClient:
     ) -> None:
         """Upload a file attachment to an existing Jira issue."""
 
+        await self._ensure_vpn()
         async with self._make_client(pat) as client:
             headers = {"X-Atlassian-Token": "no-check"}
             files = {"file": (filename, content, mime_type)}

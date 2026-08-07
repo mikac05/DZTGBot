@@ -56,6 +56,7 @@ async def run() -> None:
     jira_client = JiraClient(
         base_url=settings.jira_url,
         verify_ssl=settings.jira_verify_ssl,
+        vpn_manager=vpn_manager,
     )
     analyzer = GeminiAnalyzer(
         api_key=settings.gemini_api_key,
