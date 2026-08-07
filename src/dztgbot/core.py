@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
+
+# Maximum number of forwarded messages that can be batched into a single Jira issue
+MAX_BATCH_SIZE = 20
+# Editing draft timeout in seconds (15 minutes)
+EDITING_TIMEOUT_SECONDS = 900
 
 from telegram import (
     InlineKeyboardButton,
@@ -223,6 +229,11 @@ def build_forward_handlers(
         lock: asyncio.Lock = context.user_data.setdefault("batch_lock", asyncio.Lock())
         async with lock:
             batch: list[ForwardedMessage] = context.user_data.setdefault("pending_batch", [])
+            if len(batch) >= MAX_BATCH_SIZE:
+                await incoming.reply_text(
+                    f"⚠️ 單次轉發上限為 {MAX_BATCH_SIZE} 則訊息，請分批處理。"
+                )
+                return
             batch.append(record)
             batch_count = len(batch)
             context.user_data["last_forward_time"] = asyncio.get_running_loop().time()
@@ -287,9 +298,22 @@ def build_forward_handlers(
 
                     credentials = await user_store.get(user.id)
                     if credentials is None:
+                        no_auth_keyboard = InlineKeyboardMarkup(
+                            [
+                                [
+                                    InlineKeyboardButton(
+                                        "\u270f\ufe0f 編輯草稿", callback_data="jira_edit"
+                                    ),
+                                    InlineKeyboardButton(
+                                        "\u274c 取消", callback_data="jira_cancel"
+                                    ),
+                                ]
+                            ]
+                        )
                         await incoming.reply_text(
                             f"{preview}\n\n"
-                            "\u26a0\ufe0f 您尚未綁定 Jira 帳號，請先在私聊視窗中使用 /auth 進行綁定，然後再進行轉發。"
+                            "\u26a0\ufe0f 您尚未綁定 Jira 帳號，請先在私聊視窗中使用 /auth 進行綁定後再建立工單。",
+                            reply_markup=no_auth_keyboard,
                         )
                         return
 
@@ -344,6 +368,7 @@ def build_forward_handlers(
         )
         context.user_data["pending_template"] = default_template
         context.user_data["editing_draft"] = True
+        context.user_data["editing_draft_time"] = time.monotonic()
 
         blank_editable = jira_template_editable_text(default_template)
         await incoming.reply_text(
@@ -373,6 +398,17 @@ def build_forward_handlers(
             return
 
         if not context.user_data.get("editing_draft"):
+            return
+
+        # Auto-expire editing mode after timeout
+        draft_start = context.user_data.get("editing_draft_time", 0)
+        if draft_start and (time.monotonic() - draft_start) > EDITING_TIMEOUT_SECONDS:
+            context.user_data["editing_draft"] = False
+            context.user_data.pop("editing_draft_time", None)
+            await incoming.reply_text(
+                "⏰ 編輯已逾時（超過 15 分鐘），草稿已保存。\n"
+                "如需繼續編輯，請重新點擊 [✏️ 編輯草稿] 或使用 /new。"
+            )
             return
 
         if forwarded_message_in(incoming) is not None:
@@ -551,6 +587,7 @@ def build_forward_handlers(
                     context.user_data["editing_published_key"] = last_pub["key"]
                     context.user_data["pending_template"] = last_pub["template"]
                     context.user_data["editing_draft"] = True
+                    context.user_data["editing_draft_time"] = time.monotonic()
 
                 from .analysis import jira_template_editable_text
 
@@ -573,6 +610,7 @@ def build_forward_handlers(
                 return
 
             context.user_data["editing_draft"] = True
+            context.user_data["editing_draft_time"] = time.monotonic()
             from .analysis import jira_template_editable_text
 
             editable_text = jira_template_editable_text(template)
@@ -633,6 +671,10 @@ def build_forward_handlers(
 
         photo_file_ids = context.user_data.pop("pending_photo_file_ids", []) if context.user_data else []
         uploaded_photos = 0
+        if photo_file_ids and query.message is not None:
+            await query.message.reply_text(
+                f"📷 正在上傳 {len(photo_file_ids)} 張圖片至 Jira 工單..."
+            )
         for idx, file_id in enumerate(photo_file_ids, 1):
             try:
                 tg_file = await context.bot.get_file(file_id)

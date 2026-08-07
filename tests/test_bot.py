@@ -30,7 +30,6 @@ class SettingsTests(unittest.TestCase):
         environment = {
             "TELEGRAM_BOT_TOKEN": "TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN",
             "GEMINI_API_KEY": "TEST_ONLY_NOT_A_REAL_GEMINI_KEY",
-            "GEMINI_MODEL": "TEST_ONLY_MODEL_IDENTIFIER",
             "TELEGRAM_ADMIN_USER_IDS": "1001,1002",
             "JIRA_RULES_PATH": "var/test-rules.txt",
             "JIRA_URL": "https://jira.test.example.com",
@@ -51,7 +50,6 @@ class SettingsTests(unittest.TestCase):
         environment = {
             "TELEGRAM_BOT_TOKEN": "TEST_ONLY_NOT_A_REAL_TELEGRAM_TOKEN",
             "GEMINI_API_KEY": "TEST_ONLY_NOT_A_REAL_GEMINI_KEY",
-            "GEMINI_MODEL": "TEST_ONLY_MODEL_IDENTIFIER",
             "TELEGRAM_ADMIN_USER_IDS": "1001",
             "JIRA_RULES_PATH": "var/test-rules.txt",
             "JIRA_URL": "https://jira.test.example.com",
@@ -353,7 +351,8 @@ class GeminiAnalyzerTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
-        analyzer._model = "TEST_ONLY_MODEL"
+        analyzer._models = ["TEST_ONLY_MODEL"]
+        analyzer._current_model_index = 0
         analyzer._timeout_seconds = 1
         analyzer._rules_store = FakeRulesStore()
         analyzer._default_project_key = None
@@ -368,6 +367,53 @@ class GeminiAnalyzerTests(unittest.IsolatedAsyncioTestCase):
         result = await analyzer.analyze(forwarded)
         self.assertIsInstance(result, JiraTaskTemplate)
         self.assertEqual(result.summary, "Test summary")
+
+    async def test_rate_limit_fallback_switches_model(self) -> None:
+        class FakeRulesStore:
+            async def current_rules(self) -> str:
+                return "TEST_RULES"
+
+        call_log: list[str] = []
+
+        class FailFirstModel:
+            async def generate_content(self, model: str, **kwargs: object) -> SimpleNamespace:
+                call_log.append(model)
+                if model == "gemini-3.5-flash-lite":
+                    raise RuntimeError("HTTP 429 Resource Exhausted")
+                return SimpleNamespace(
+                    parsed={
+                        "summary": "Fallback summary",
+                        "description": "Fallback description",
+                        "issuetype": "Task",
+                        "labels": ["test"],
+                        "priority": "Medium",
+                        "project_key": None,
+                        "components": [],
+                        "assignee": None,
+                        "acceptance_criteria": ["Criterion"],
+                    },
+                    text=None,
+                )
+
+        analyzer = GeminiAnalyzer.__new__(GeminiAnalyzer)
+        analyzer._models = ["gemini-3.5-flash-lite", "gemini-3.6-flash"]
+        analyzer._current_model_index = 0
+        analyzer._timeout_seconds = 5
+        analyzer._rules_store = FakeRulesStore()
+        analyzer._default_project_key = None
+        analyzer._client = SimpleNamespace(aio=SimpleNamespace(models=FailFirstModel()))
+
+        forwarded = ForwardedMessage(
+            original_sender=None,
+            original_chat=None,
+            text="Test message",
+            media_type=MediaType.TEXT,
+        )
+
+        result = await analyzer.analyze(forwarded)
+        self.assertEqual(result.summary, "Fallback summary")
+        self.assertEqual(call_log, ["gemini-3.5-flash-lite", "gemini-3.6-flash"])
+        self.assertEqual(analyzer.current_model, "gemini-3.6-flash")
 
 
 class ErrorLoggingTests(unittest.IsolatedAsyncioTestCase):

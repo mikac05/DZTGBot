@@ -15,7 +15,6 @@ class Settings:
 
     telegram_bot_token: str = field(repr=False)
     gemini_api_key: str = field(repr=False)
-    gemini_model: str
     gemini_timeout_seconds: float
     telegram_admin_user_ids: frozenset[int]
     telegram_concurrent_updates: int
@@ -50,10 +49,6 @@ class Settings:
             raise RuntimeError(
                 "GEMINI_API_KEY must be supplied through the environment or a local .env file."
             )
-
-        gemini_model = os.getenv("GEMINI_MODEL", "").strip()
-        if not gemini_model or gemini_model.startswith("TODO_"):
-            raise RuntimeError("GEMINI_MODEL must name a supported model in the environment.")
 
         raw_timeout = os.getenv("GEMINI_TIMEOUT_SECONDS", "30").strip()
         try:
@@ -164,7 +159,6 @@ class Settings:
         return cls(
             telegram_bot_token=token,
             gemini_api_key=gemini_api_key,
-            gemini_model=gemini_model,
             gemini_timeout_seconds=gemini_timeout_seconds,
             telegram_admin_user_ids=telegram_admin_user_ids,
             telegram_concurrent_updates=telegram_concurrent_updates,

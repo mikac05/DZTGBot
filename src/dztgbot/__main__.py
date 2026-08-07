@@ -59,7 +59,6 @@ async def run() -> None:
     )
     analyzer = GeminiAnalyzer(
         api_key=settings.gemini_api_key,
-        model=settings.gemini_model,
         timeout_seconds=settings.gemini_timeout_seconds,
         rules_store=rules_store,
         default_project_key=settings.jira_default_project_key,
