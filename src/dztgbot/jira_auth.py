@@ -79,18 +79,20 @@ def build_auth_handlers(
 
         if chat.type != "private":
             await message.reply_text(
-                "🔒 For security, please use /auth in a private chat with me.\n"
-                "Tap my name to open a direct conversation."
+                "🔒 为了您的账号安全，请在与机器人的私聊窗口中发送 /auth 进行绑定。\n"
+                "点击机器人头像即可开启私聊。"
             )
             return ConversationHandler.END
 
         await message.reply_text(
-            f"🔗 Let's connect your Jira account on {jira_host}.\n\n"
-            "Please send your Jira Personal Access Token (PAT).\n\n"
-            "To create a PAT: go to Jira → your profile → "
-            "Personal Access Tokens → Create token.\n\n"
-            "⚠️ I'll delete your message containing the token "
-            "immediately for security."
+            "🔑 <b>绑定您的 Jira 账号</b>\n\n"
+            "请直接发送您的 Jira 认证凭据，支持以下格式：\n\n"
+            "1. <b>个人访问令牌 (PAT)</b>: 直接发送令牌或 <code>Bearer 令牌内容</code>\n"
+            "2. <b>账号密码</b>: <code>用户名:密码</code>\n"
+            "3. <b>Session Cookie</b>: <code>JSESSIONID=Cookie内容</code>\n\n"
+            "⚠️ <b>安全提示</b>：机器人接收到凭据后将<b>立即自动删除</b>您包含凭据的消息。\n"
+            "如需取消绑定，请发送 /cancel。",
+            parse_mode="HTML",
         )
         return AWAITING_PAT
 
@@ -115,21 +117,20 @@ def build_auth_handlers(
 
         if not pat:
             await chat.send_message(
-                "The token cannot be empty. Please send your PAT, "
-                "or /cancel to stop."
+                "❌ 凭据不能为空。请重新发送您的认证凭据，或发送 /cancel 取消。"
             )
             return AWAITING_PAT
 
         status_message = await chat.send_message(
-            "🔄 Validating your token with the Jira server..."
+            "🔄 正在验证您的 Jira 认证凭据..."
         )
 
         try:
             jira_user = await jira_client.validate_credentials(pat)
         except JiraClientError as error:
             await status_message.edit_text(
-                f"❌ {error}\n\n"
-                "Please check your token and try again, or /cancel to stop."
+                f"❌ 验证失败: {error}\n\n"
+                "请检查您的凭据后重新发送，或发送 /cancel 取消。"
             )
             return AWAITING_PAT
 
@@ -141,12 +142,11 @@ def build_auth_handlers(
         await user_store.store(user.id, credentials)
 
         await status_message.edit_text(
-            f"✅ Connected! Authenticated as "
-            f'"{jira_user.display_name}" ({jira_user.username}) '
-            f"on {jira_host}.\n\n"
-            "You can now forward messages to me and I'll help create "
-            "Jira issues.\n\n"
-            "Use /logout to disconnect your Jira account."
+            f"✅ <b>Jira 账号绑定成功！</b>\n\n"
+            f"已成功验证身份：<b>{jira_user.display_name}</b> ({jira_user.username})\n\n"
+            "您可以直接转发消息给机器人生成工单，或点击下方 [📝 手动创建 Jira 工单] 按钮。\n\n"
+            "如需解绑请随时发送 /logout。",
+            parse_mode="HTML",
         )
 
         LOGGER.info(
@@ -163,7 +163,7 @@ def build_auth_handlers(
 
         message = update.effective_message
         if message is not None:
-            await message.reply_text("Authentication cancelled.")
+            await message.reply_text("已取消 Jira 账号绑定操作。")
         return ConversationHandler.END
 
     async def logout_command(
@@ -179,12 +179,12 @@ def build_auth_handlers(
         removed = await user_store.remove(user.id)
         if removed:
             await message.reply_text(
-                "🔓 Disconnected. Your Jira credentials have been removed.\n\n"
-                "Use /auth to reconnect."
+                "🚪 <b>已成功解绑！</b>\n\n您的 Jira 认证信息已安全清除。如需重新绑定请发送 /auth。",
+                parse_mode="HTML",
             )
         else:
             await message.reply_text(
-                "You don't have any stored Jira credentials."
+                "未检测到您已绑定的 Jira 账号。"
             )
 
     auth_conversation = ConversationHandler(
