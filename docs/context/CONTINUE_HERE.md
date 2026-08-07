@@ -2,86 +2,98 @@
 
 ## Current status
 
-The complete read-only Telegram workflow, UX, resilience, maintainability, and
-operations audit is saved at
-`docs/reviews/telegram-bot-end-to-end-review-2026-08-07.md`.
+Phases 0, 1, 2, and 3 of the multi-agent remediation program ([`MASTER_PLAN.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/MASTER_PLAN.md)) are 100% complete and verified:
 
-No application code was changed. The review concluded that the current bot is a
-credible private, serial-use pilot but is not safe for multi-user/group
-production use yet.
+- **Phase 0 (Contracts & Characterization)**: Frozen system contracts ([`docs/architecture/workflow-contracts.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/docs/architecture/workflow-contracts.md), [`docs/architecture/dependency-rules.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/docs/architecture/dependency-rules.md)), characterization test harness, and security contract baseline.
+- **Phase 1 (Domain, FSM & Callback Policy)**: Canonical domain models ([`src/dztgbot/domain/models.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/models.py)), state machine FSM ([`src/dztgbot/domain/fsm.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/fsm.py)), callback token grammar ([`src/dztgbot/domain/callbacks.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/callbacks.py)), security policy ([`src/dztgbot/domain/policy.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/policy.py)), domain error taxonomy ([`src/dztgbot/domain/errors.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/errors.py)), and pure Python domain protocols ([`src/dztgbot/domain/ports.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/ports.py)).
+- **Phase 2 (Durable Persistence & Credential Hardening)**: Production SQLite workflow repository ([`src/dztgbot/infrastructure/persistence/workflow_sqlite.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/infrastructure/persistence/workflow_sqlite.py)) with WAL mode, schema migrations, SHA-256 token hashing, one-winner CAS state transitions, and attempt claims. `UserStore` copy-on-write persistence and corruption quarantine ([`src/dztgbot/user_store.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/user_store.py)).
+- **Phase 3 (Pure Application Services)**:
+  - Task P3-A: `WorkflowService` ([`src/dztgbot/services/workflow_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/workflow_service.py)) & `ConnectivityService` ([`src/dztgbot/services/connectivity_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/connectivity_service.py)).
+  - Task P3-C: `IntakeService` ([`src/dztgbot/services/intake_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/intake_service.py)).
+  - Task P3-G: `CallbackService` ([`src/dztgbot/services/callback_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/callback_service.py)).
 
-Highest-priority observed risks:
-
-1. Generic callbacks resolve against one mutable latest draft or
-   `last_published` issue per Telegram user, not the object displayed by the
-   button.
-2. Draft and batch state is per user rather than per chat/workflow, so concurrent
-   chats and simultaneous drafts can collide.
-3. `ConversationHandler` is combined with concurrent update processing.
-4. Jira creation removes the draft before the request, so a failure loses the
-   retry context; ambiguous timeouts can cause duplicates.
-5. Published-issue editing can target the latest issue from an older button,
-   updates only a subset of fields, and loses the update target on failure.
-6. Authentication has no timeout, accepts passwords/session cookies, and
-   silently ignores Telegram credential-message deletion failure.
-7. Media capability is misleading: Gemini receives no media bytes and only
-   Telegram photos are uploaded to Jira.
-8. Tracked README, test-plan, deployment, VPN, and stable-context statements had
-   contradictory current-state claims. The audit records these discrepancies;
-   application documentation outside `docs/context/` has not yet been repaired.
-
-Local audit verification on 2026-08-07:
-
-- 30/30 offline unit tests passed with Python 3.12.13.
-- Source compilation passed.
-- Repository context and secret-safety validation passed.
-- The Windows virtual environment failed `pip check` for two platform-specific
-  installations; treat this as local environment drift until recreated.
-- No live Telegram, Gemini, Jira, VPN, systemd, or remote-server verification was
-  performed during the audit.
+Local test verification:
+- **212/212 offline unit tests PASSED** in 0.858s.
+- Zero file collisions across agent tracks.
 
 ## Exact next action
 
-After running `DZTGBot continue` on the other computer, read the saved review and
-ask the user to approve the first remediation batch. The recommended first batch
-is: unique draft IDs plus owner/chat binding, an explicit workflow state machine,
-PTB-compatible stateful concurrency, failure-preserving Jira submission with
-duplicate protection, and handler-level tests for those invariants.
+Upon resuming work (or running `DZTGBot continue`), execute **Phase 4: Provider Gateways and Mutation Recovery** according to `MASTER_PLAN.md`.
 
-Do not implement that batch until the user confirms the scope.
+### Recommended Run Order for Phase 4:
+
+1. **Step 1: Codex (Task P4-C1 & P4-C3)** — Jira Gateway, canonical payloads, shared transport (`infrastructure/jira_gateway.py`) and Gemini Gateway (`infrastructure/gemini_gateway.py`).
+2. **Step 2: Codex (Task P4-C2)** — Submission, reconciliation, and attachment services (`services/submission_service.py`, `services/attachment_service.py`).
+3. **Step 3: Antigravity (Task P4-A)** — Provider orchestration boundaries & architecture dependency tests (`docs/architecture/provider-boundaries.md`, `tests/test_architecture_dependencies.py`).
+4. **Step 4: Grok (Task P4-G)** — Strict configuration & security defaults (`config.py`, `.env.example`).
+
+### Prompts for Phase 4 Execution:
+
+#### Prompt for Codex (Task P4-C1, P4-C2, P4-C3):
+```markdown
+Execute Phase 4 Tasks P4-C1, P4-C2, P4-C3 in DZTGBot repository according to MASTER_PLAN.md:
+
+Scope & Files (Exclusive to Codex):
+- src/dztgbot/infrastructure/jira_gateway.py
+- src/dztgbot/infrastructure/gemini_gateway.py
+- src/dztgbot/services/submission_service.py
+- src/dztgbot/services/attachment_service.py
+- tests/test_jira_gateway.py
+- tests/test_jira_credential_isolation.py
+- tests/test_submission_recovery.py
+- tests/test_ambiguous_create.py
+- tests/test_attachment_service.py
+- tests/test_gemini_gateway.py
+
+Requirements:
+1. Build Jira Gateway (JiraGatewayPort) with strict request/response DTOs, single httpx.AsyncClient connection pool, per-request Bearer auth headers, bounded timeouts, and metadata caching.
+2. Implement SubmissionService for failure-preserving Jira create/update attempts, canonical request hashing, SUBMISSION_UNKNOWN timeout handling, and published edit diffing.
+3. Implement AttachmentService for bounded, deduplicated photo uploads without recreating issues.
+4. Implement Gemini Gateway (AIAnalyzerPort) with prompt character budgets, rate limit classification, and deadline handling.
+5. Add unit tests for all gateway and submission recovery logic.
+```
+
+#### Prompt for Antigravity (Task P4-A):
+```markdown
+Execute Phase 4 Task P4-A in DZTGBot repository according to MASTER_PLAN.md:
+
+Scope & Files (Exclusive to Antigravity):
+- docs/architecture/provider-boundaries.md
+- tests/test_architecture_dependencies.py
+
+Requirements:
+1. Document provider orchestration boundaries in docs/architecture/provider-boundaries.md (adapters wrap third-party SDKs, domain/services import no provider exceptions or Telegram API objects).
+2. Add automated architectural dependency tests in tests/test_architecture_dependencies.py checking import direction and cycle prevention.
+```
+
+#### Prompt for Grok (Task P4-G):
+```markdown
+Execute Phase 4 Task P4-G in DZTGBot repository according to MASTER_PLAN.md:
+
+Scope & Files (Exclusive to Grok):
+- src/dztgbot/config.py
+- .env.example
+- tests/test_config_security.py
+- tests/test_config_paths.py
+
+Requirements:
+1. Add configuration validation for WORKFLOW_DB_PATH, auth TTL, queue/size/concurrency limits, and optional allowed-user policy.
+2. Validate Jira URL formatting, represent absent paths as None, and enforce PAT-only/private-chat defaults.
+```
 
 ## Inputs still required from the user or target environment
 
-- Approval of the first implementation batch and its priority order.
-- Decision whether group-chat creation remains supported or the bot becomes
-  private-chat-only for mutating workflows.
-- Decision whether authentication will be PAT-only.
-- Decision whether durable draft/submission state should use SQLite or another
-  approved transactional store.
-- Fresh target-environment access only if the user asks to verify or redeploy the
-  live service.
+- Fresh target-environment access only if the user asks to verify or redeploy the live service.
+- Confirmation of target Jira server custom field / idempotency property capabilities during Phase 4 integration.
 
 ## Do not redo
 
-- Do not repeat the full repository workflow audit unless code changed in the
-  audited areas or contradictory evidence appears.
-- Do not treat the prior deployment claim as freshly verified on a new computer.
-- Do not reconfigure NetworkManager, VPN routing, systemd, Telegram BotFather,
-  Jira, or Gemini without explicit authorization and target-environment access.
-- Do not remove the existing lazy VPN checks in `JiraClient` as part of the state
-  remediation.
-- Do not create Jira issues during development without an explicit approved test
-  phase.
+- Do not repeat completed Phase 0, Phase 1, Phase 2, or Phase 3 implementation.
+- Do not bypass master plan boundaries or file-ownership mappings.
+- Do not reconfigure NetworkManager, VPN routing, systemd, Telegram BotFather, Jira, or Gemini without explicit authorization.
 
 ## Required verification on resume
 
-- Confirm the handoff commit is the checked-out `HEAD` after
-  `python scripts/handoff.py continue`.
-- Read this file, `PROJECT_CONTEXT.md`, and the saved review before proposing
-  code changes.
-- Recreate or repair the local Python 3.12 virtual environment if `pip check`
-  still reports platform-incompatible packages.
-- Run `PYTHONPATH=src python -m unittest discover -s tests -v` before and after
-  any implementation.
-- Verify external service state only when authorized; repository files do not
-  transfer credentials or authenticated sessions.
+- Confirm the handoff commit is checked out `HEAD` after `python scripts/handoff.py continue`.
+- Run `$env:PYTHONPATH="src"; .venv\Scripts\python.exe -m unittest discover -s tests -v` to verify 212 tests pass.
+- Execute Phase 4 tasks in the specified run order.
