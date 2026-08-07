@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
@@ -341,10 +342,10 @@ def build_forward_handlers(
 
         blank_editable = jira_template_editable_text(default_template)
         await incoming.reply_text(
-            "📝 **手动创建 Jira 工单**\n\n"
+            "📝 <b>手动创建 Jira 工单</b>\n\n"
             "请点击/复制下方代码框内的完整文字，在输入框中填入各个字段内容后发送给机器人：\n\n"
-            f"```\n{blank_editable}\n```",
-            parse_mode="Markdown",
+            f"<pre><code>{html.escape(blank_editable)}</code></pre>",
+            parse_mode="HTML",
         )
 
     async def handle_edited_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -387,8 +388,8 @@ def build_forward_handlers(
         if validation_errors:
             error_msg = "\n".join(f"❌ {err}" for err in validation_errors)
             await incoming.reply_text(
-                f"⚠️ **工单内容不符合规范，请修正后重新发送：**\n\n{error_msg}",
-                parse_mode="Markdown",
+                f"⚠️ <b>工单内容不符合规范，请修正后重新发送：</b>\n\n{html.escape(error_msg)}",
+                parse_mode="HTML",
             )
             context.user_data["pending_template"] = updated_template
             return
@@ -430,14 +431,14 @@ def build_forward_handlers(
                         ]
                     )
                     await incoming.reply_text(
-                        f"\u2705 **Jira 工单 {res.key} 更新成功！**\n{res.url}",
+                        f"\u2705 <b>Jira 工单 {html.escape(res.key)} 更新成功！</b>\n{html.escape(res.url)}",
                         reply_markup=keyboard,
-                        parse_mode="Markdown",
+                        parse_mode="HTML",
                     )
                     return
                 except JiraClientError as error:
                     LOGGER.error("Jira issue update failed (%s)", type(error).__name__)
-                    await incoming.reply_text(f"\u274c 工单更新失败: {error}")
+                    await incoming.reply_text(f"\u274c 工单更新失败: {html.escape(str(error))}")
                     return
 
         context.user_data["pending_template"] = updated_template
@@ -461,9 +462,9 @@ def build_forward_handlers(
             ]
         )
         await incoming.reply_text(
-            f"\u2705 **草稿已更新！**\n\n{preview}",
+            f"\u2705 <b>草稿已更新！</b>\n\n{html.escape(preview)}",
             reply_markup=keyboard,
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
 
     async def handle_issue_callback(
@@ -495,8 +496,8 @@ def build_forward_handlers(
             if last_pub and query.message is not None:
                 url = last_pub["url"]
                 await query.message.reply_text(
-                    f"\U0001f517 **Jira 工单链接**（点击框内一键复制）：\n\n`{url}`",
-                    parse_mode="Markdown",
+                    f"\U0001f517 <b>Jira 工单链接</b>（点击框内一键复制）：\n\n<pre><code>{html.escape(url)}</code></pre>",
+                    parse_mode="HTML",
                 )
             return
 
@@ -506,9 +507,10 @@ def build_forward_handlers(
                 key = last_pub["key"]
                 summary = last_pub["summary"]
                 url = last_pub["url"]
+                text_content = f"【{key}】{summary}\n{url}"
                 await query.message.reply_text(
-                    f"\U0001f4cb **Jira 工单链接与摘要**（点击框内一键复制）：\n\n`【{key}】{summary}\n{url}`",
-                    parse_mode="Markdown",
+                    f"\U0001f4cb <b>Jira 工单链接与摘要</b>（点击框内一键复制）：\n\n<pre><code>{html.escape(text_content)}</code></pre>",
+                    parse_mode="HTML",
                 )
             return
 
@@ -524,10 +526,10 @@ def build_forward_handlers(
 
                 editable_text = jira_template_editable_text(last_pub["template"])
                 await query.message.reply_text(
-                    f"✏️ **编辑已发布工单 ({last_pub['key']})**\n\n"
+                    f"✏️ <b>编辑已发布工单 ({html.escape(last_pub['key'])})</b>\n\n"
                     "请点击/复制下方代码框内的完整文字，在输入框中修改后发送给机器人直接更新：\n\n"
-                    f"```\n{editable_text}\n```",
-                    parse_mode="Markdown",
+                    f"<pre><code>{html.escape(editable_text)}</code></pre>",
+                    parse_mode="HTML",
                 )
             return
 
@@ -546,9 +548,9 @@ def build_forward_handlers(
             editable_text = jira_template_editable_text(template)
             if query.message is not None:
                 await query.message.reply_text(
-                    "✏️ **请点击/复制下方代码框内的完整文字，修改后再直接发送给机器人：**\n\n"
-                    f"```\n{editable_text}\n```",
-                    parse_mode="Markdown",
+                    "✏️ <b>请点击/复制下方代码框内的完整文字，修改后再直接发送给机器人：</b>\n\n"
+                    f"<pre><code>{html.escape(editable_text)}</code></pre>",
+                    parse_mode="HTML",
                 )
             return
 
@@ -595,7 +597,7 @@ def build_forward_handlers(
             LOGGER.error("Jira issue creation failed (%s)", type(error).__name__)
             if query.message is not None:
                 await query.message.reply_text(
-                    f"\u274c 工单创建失败: {error}"
+                    f"\u274c 工单创建失败: {html.escape(str(error))}"
                 )
             return
 
@@ -627,12 +629,12 @@ def build_forward_handlers(
 
         if query.message is not None:
             await query.message.reply_text(
-                f"\u2705 **Jira 工单创建成功！**\n\n"
-                f"**Key**: `{result.key}`\n"
-                f"**标题**: {template.summary}\n"
-                f"**链接**: {result.url}",
+                f"\u2705 <b>Jira 工单创建成功！</b>\n\n"
+                f"<b>Key</b>: <code>{html.escape(result.key)}</code>\n"
+                f"<b>标题</b>: {html.escape(template.summary)}\n"
+                f"<b>链接</b>: {html.escape(result.url)}",
                 reply_markup=keyboard,
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
 
     return (
