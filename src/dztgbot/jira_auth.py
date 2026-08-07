@@ -42,8 +42,12 @@ def build_auth_handlers(
             return
 
         keyboard = ReplyKeyboardMarkup(
-            [["📝 手動建立 Jira 工單"]],
+            [
+                [KeyboardButton("📝 手動建立 Jira 工單")],
+                [KeyboardButton("🔑 綁定 Jira 帳號"), KeyboardButton("🚪 解綁 Jira 帳號")],
+            ],
             resize_keyboard=True,
+            is_persistent=True,
         )
 
         credentials = await user_store.get(user.id)
@@ -52,7 +56,7 @@ def build_auth_handlers(
                 f"👋 歡迎使用 DZTGBot！目前綁定的 Jira 帳號: "
                 f'"{credentials.jira_display_name}" '
                 f"({credentials.jira_username})。\n\n"
-                "您可以直接轉發訊息給機器人生成工單，或點擊下方 [📝 手動建立 Jira 工單] / 使用 /new 手動建立。\n\n"
+                "您可以直接轉發訊息給機器人生成工單，或點擊下方按鈕手動建立。\n\n"
                 "常用指令：\n"
                 "/new — 📝 手動建立 Jira 工單\n"
                 "/auth — 🔑 重新綁定 Jira 帳號\n"
@@ -63,7 +67,7 @@ def build_auth_handlers(
             await message.reply_text(
                 "👋 歡迎使用 DZTGBot！\n\n"
                 "轉發任何訊息給機器人，或點擊下方 [📝 手動建立 Jira 工單] 按鈕即可快速建立 Jira 工單。\n\n"
-                "使用前請先發送 /auth 綁定您的 Jira 帳號。",
+                "使用前請先點擊下方 [🔑 綁定 Jira 帳號] 或發送 /auth 綁定您的帳號。",
                 reply_markup=keyboard,
             )
 
@@ -188,7 +192,10 @@ def build_auth_handlers(
             )
 
     auth_conversation = ConversationHandler(
-        entry_points=[CommandHandler("auth", auth_entry)],
+        entry_points=[
+            CommandHandler("auth", auth_entry),
+            MessageHandler(filters.Regex(r"^(🔑 綁定 Jira 帳號|🔑 绑定 Jira 账号)$"), auth_entry),
+        ],
         states={
             AWAITING_PAT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, receive_pat),
@@ -203,4 +210,5 @@ def build_auth_handlers(
         auth_conversation,
         CommandHandler("start", start_command),
         CommandHandler("logout", logout_command),
+        MessageHandler(filters.Regex(r"^(🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_command),
     )

@@ -18,11 +18,13 @@ EDITING_TIMEOUT_SECONDS = 900
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
     MessageOriginChannel,
     MessageOriginChat,
     MessageOriginHiddenUser,
     MessageOriginUser,
+    ReplyKeyboardMarkup,
     Update,
 )
 from telegram.ext import (
@@ -67,6 +69,42 @@ class MediaType(StrEnum):
     VIDEO_NOTE = "video_note"
     VOICE = "voice"
     UNKNOWN = "unknown"
+
+
+def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Return the persistent 2-row main menu bottom keyboard."""
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📝 手動建立 Jira 工單")],
+            [KeyboardButton("🔑 綁定 Jira 帳號"), KeyboardButton("🚪 解綁 Jira 帳號")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def get_draft_keyboard() -> ReplyKeyboardMarkup:
+    """Return the interactive draft menu keyboard for quick field toggles."""
+    return ReplyKeyboardMarkup(
+        [
+            [
+                KeyboardButton("🏷️ 類型: Task"),
+                KeyboardButton("🏷️ 類型: 缺陷"),
+                KeyboardButton("🏷️ 類型: 優化"),
+                KeyboardButton("🏷️ 類型: Epic"),
+            ],
+            [
+                KeyboardButton("⚡ 優先級: High"),
+                KeyboardButton("⚡ 優先級: Medium"),
+                KeyboardButton("⚡ 優先級: Low"),
+            ],
+            [
+                KeyboardButton("✅ 確定提交工單"),
+                KeyboardButton("❌ 取消草稿"),
+            ],
+        ],
+        resize_keyboard=True,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -429,10 +467,11 @@ def build_forward_handlers(
 
         await incoming.reply_text(
             "📝 <b>手動建立 Jira 工單</b>\n\n"
-            "請直接回覆您要建立的工單內容：\n"
+            "請直接發送您要建立的工單內容：\n"
             "• <b>第一行</b>：工單標題\n"
             "• <b>後續行數</b>：詳細描述（可附帶圖片）\n\n"
-            "💡 <i>快捷技巧：您也可以直接輸入 <code>/new 工單標題</code> 一鍵建立草稿！</i>",
+            "💡 <i>提示：亦可在下方按鈕直接切換類型/優先級！</i>",
+            reply_markup=get_draft_keyboard(),
             parse_mode="HTML",
         )
 
@@ -451,7 +490,26 @@ def build_forward_handlers(
         if not text_content and not incoming.photo:
             return
 
-        if text_content.strip() in ("/new", "📝 手動建立 Jira 工單", "📝 手动创建 Jira 工单"):
+        raw = text_content.strip()
+
+        if raw in ("❌ 取消草稿", "❌ 取消"):
+            context.user_data["editing_draft"] = False
+            context.user_data.pop("editing_draft_time", None)
+            context.user_data.pop("pending_template", None)
+            context.user_data.pop("pending_photo_file_ids", None)
+            await incoming.reply_text("已取消草稿。", reply_markup=get_main_menu_keyboard())
+            return
+
+        if raw == "✅ 確定提交工單":
+            template = context.user_data.get("pending_template")
+            if not template or not template.summary or not template.summary.strip():
+                await incoming.reply_text("⚠️ 工單標題不能為空，請先發送工單內容（第一行為標題）。", reply_markup=get_draft_keyboard())
+                return
+            context.user_data["editing_draft"] = False
+            # Fall through to process submission using existing template
+            raw = f"標題: {template.summary}\n描述:\n{template.description}"
+
+        if raw in ("/new", "📝 手動建立 Jira 工單", "📝 手动创建 Jira 工单"):
             await new_issue_command(update, context)
             return
 
@@ -465,7 +523,8 @@ def build_forward_handlers(
             context.user_data.pop("editing_draft_time", None)
             await incoming.reply_text(
                 "⏰ 編輯已逾時（超過 15 分鐘），草稿已保存。\n"
-                "如需繼續編輯，請重新點擊 [✏️ 完整修改] 或使用 /new。"
+                "如需繼續編輯，請重新點擊 [✏️ 完整修改] 或使用 /new。",
+                reply_markup=get_main_menu_keyboard(),
             )
             return
 
@@ -488,10 +547,34 @@ def build_forward_handlers(
                 acceptance_criteria=[],
             )
 
-        # Smart Natural Text Intake vs Formatted Block Intake
-        raw = text_content.strip()
-        lower_raw = raw.lower()
-        if any(lower_raw.startswith(p) for p in ("標題:", "標題：", "标题:", "标题：", "summary:")):
+        # Bottom Reply Keyboard button interactions
+        if raw.startswith("🏷️ 類型:"):
+            new_type = raw.split(":", 1)[-1].strip()
+            updated_template = JiraTaskTemplate(
+                summary=original_template.summary,
+                description=original_template.description,
+                issuetype=new_type,
+                labels=original_template.labels,
+                priority=original_template.priority,
+                project_key=original_template.project_key,
+                components=original_template.components,
+                assignee=original_template.assignee,
+                acceptance_criteria=original_template.acceptance_criteria,
+            )
+        elif raw.startswith("⚡ 優先級:"):
+            new_prio = raw.split(":", 1)[-1].strip()
+            updated_template = JiraTaskTemplate(
+                summary=original_template.summary,
+                description=original_template.description,
+                issuetype=original_template.issuetype,
+                labels=original_template.labels,
+                priority=new_prio,
+                project_key=original_template.project_key,
+                components=original_template.components,
+                assignee=original_template.assignee,
+                acceptance_criteria=original_template.acceptance_criteria,
+            )
+        elif any(raw.lower().startswith(p) for p in ("標題:", "標題：", "标题:", "标题：", "summary:")):
             updated_template = parse_edited_template(text_content, original_template)
         else:
             lines = raw.splitlines()
@@ -640,7 +723,7 @@ def build_forward_handlers(
             except Exception:
                 pass
             if query.message is not None:
-                await query.message.reply_text("已取消操作。")
+                await query.message.reply_text("已取消操作。", reply_markup=get_main_menu_keyboard())
             return
 
         if query.data == "jira_copylink":
