@@ -31,7 +31,11 @@ SYSTEM_INSTRUCTION = """\
 输出格式 — 严格符合 JiraTaskTemplate JSON 规范：
 - summary: 简明的中文工单标题，不超过 200 字，精准概括核心问题或需求。不要添加类型前缀。
 - description: 详细的中文描述。综合所有转发消息的上下文，包含问题背景、现象说明、复现步骤（针对 Bug）或需求动机（针对需求），并附带消息来源说明（例如：“由 xxx 通过 Telegram 报告”）。
-- issuetype: 必须在 Task, Bug, Story, Epic 四种标准类型中选择。程序报错/缺陷选 Bug；新功能需求选 Story；日常任务与优化改进选 Task；大型战略目标选 Epic。
+- issuetype: 必须从 Task, Epic, 缺陷, 优化 四种类型中选择：
+  - 错误、崩溃或问题 -> 选 "缺陷"
+  - 功能优化或改善 -> 选 "优化"
+  - 一般任务或新需求 -> 选 "Task"
+  - 大型长周期目标 -> 选 "Epic"
 - labels: 相关的英文小写带连字符标签。必须始终包含 "telegram-intake"。
 - priority: 优先级，必须从 Highest, High, Medium, Low, Lowest 中选择。默认 Medium。
 - project_key: 从规则或默认值中确定的项目 Key，无法确定时为 null。
