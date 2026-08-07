@@ -54,6 +54,31 @@ preferences when they are provided.
 - Write professionally and concisely."""
 
 
+GEMINI_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "summary": {"type": "STRING"},
+        "description": {"type": "STRING"},
+        "issuetype": {"type": "STRING"},
+        "labels": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "priority": {"type": "STRING"},
+        "project_key": {"type": "STRING", "nullable": True},
+        "components": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "assignee": {"type": "STRING", "nullable": True},
+        "acceptance_criteria": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": [
+        "summary",
+        "description",
+        "issuetype",
+        "labels",
+        "priority",
+        "components",
+        "acceptance_criteria",
+    ],
+}
+
+
 class JiraTaskTemplate(BaseModel):
     """Strict, review-only Jira task template. This is not a Jira API request."""
 
@@ -106,7 +131,7 @@ class GeminiAnalyzer:
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_INSTRUCTION,
                         response_mime_type="application/json",
-                        response_schema=JiraTaskTemplate,
+                        response_schema=GEMINI_RESPONSE_SCHEMA,
                         temperature=0,
                     ),
                 )
