@@ -1,46 +1,30 @@
-# DZTGBot continuation checkpoint
+# Continue here
 
 ## Current status
 
-The full end-to-end bot pipeline, UX improvements, model failover, and persistent keyboards are implemented and verified:
-1. **Gemini AI Analysis & Model Failover**: Production system instruction in `src/dztgbot/analysis.py` with 40% reduced token usage, structured output validation, and automatic free-tier model failover on HTTP 429 (`gemini-3.5-flash-lite` ➔ `gemini-3.6-flash` ➔ `gemini-3.5-flash` ➔ `gemini-3.1-flash-lite`).
-2. **Jira REST API v2 Integration**: `src/dztgbot/jira_client.py` handles PAT validation (`/myself`), issue creation (`/issue`), issue update (`PUT /issue/{key}`), and attachment uploads (`/issue/{key}/attachments`). All error messages localized to Taiwan Traditional Chinese.
-3. **Per-User PAT Storage**: `src/dztgbot/user_store.py` securely persists per-user PATs to disk (mode 0600, atomic writes).
-4. **Interactive Telegram Flow & Persistent Keyboards**:
-   - `/start` greetings with dynamic 2-row ReplyKeyboard (`[📝 手動建立 Jira 工單]`, `[🔑 綁定 / 🚪 解綁 Jira 帳號]`, `[📖 說明]`).
-   - `/auth` collects PAT in private chat (auto-deleting sensitive input message).
-   - `/logout` clears stored PATs.
-   - `/help` displays clear Taiwan Traditional Chinese usage guide.
-   - Forwarded messages & manual `/new` receive preview with image count, inline field toggles (`[🏷️ 類型]`, `[⚡ 優先級]`), and draft ReplyKeyboard for 0-copy-paste instant submission.
-5. **VPN Support**: NetworkManager L2TP/IPsec status/start controls integrated via `src/dztgbot/vpn.py` and `scripts/deploy.sh`.
-6. **Hardened Deployment**: Rerunnable `scripts/deploy.sh` for Ubuntu 24.04 target servers and `deploy/systemd/dztgbot.service` systemd unit.
+DZTGBot is fully deployed, configured, tested, and actively running on the remote Oracle Cloud ARM Ubuntu 24.04 server (`129.150.55.33`) with active NetworkManager L2TP/IPsec split tunneling and automatic VPN triggering on all Jira API requests (including `/auth` PAT validation, issue creation, and image uploads).
 
-30 offline tests and secret-safety validation pass cleanly.
+- **Code & Test Status**: 30/30 unit tests pass locally and on the remote server.
+- **Server Deployment**: Active systemd service `dztgbot.service` running under service user `dztgbot` on Oracle Cloud ARM Ubuntu 24.04.
+- **VPN Split Tunneling**: Configured with NetworkManager (`dztgbot-vpn`). `enp0s3` set to NetworkManager managed (`renderer: NetworkManager`). Only Jira IP `207.148.45.197/32` routes through L2TP/IPsec `ppp0` tunnel (`ipv4.never-default yes`). Telegram API and server SSH remain on direct internet.
+- **Automatic VPN Triggers**: `JiraClient` automatically triggers `_ensure_vpn()` prior to all API calls (`validate_credentials`, `create_issue`, `update_issue`, `add_attachment`), preventing timeouts during user authentication or posting.
+- **UI & Localization**: All user-facing interaction, menus, error messages, and guidance localized in Taiwan Traditional Chinese. Dynamic main menu keyboard (`[🔑 綁定 Jira 帳號] / [🚪 解綁 Jira 帳號]`, `[📝 手動建立 Jira 工單]`, `[📖 說明]`) persistent in Telegram client.
+- **Gemini Free-Tier Failover**: Automatically cycles models (`gemini-3.5-flash-lite` -> `gemini-3.6-flash` -> `gemini-3.5-flash` -> `gemini-3.1-flash-lite`) on HTTP 429 rate limit.
 
 ## Exact next action
 
-1. Push all committed changes to GitHub `origin/main`.
-2. Transfer or clone the repository to the target Ubuntu 24.04 server.
-3. Run `sudo DZTGBOT_SERVICE_USER=dztgbot DZTGBOT_ENV_FILE=/etc/dztgbot/env bash scripts/deploy.sh` to generate `/etc/dztgbot/env`.
-4. Configure `/etc/dztgbot/env` via `sudoedit /etc/dztgbot/env` with real credentials (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `JIRA_URL`, `TELEGRAM_ADMIN_USER_IDS`).
-5. Re-run `deploy.sh` to complete installation and start `dztgbot.service`.
+None required for deployment. The service is live and fully operational on the remote Ubuntu server. Optional next step: Monitor bot usage via `sudo journalctl -u dztgbot.service -f` on the remote server.
 
 ## Inputs still required from the user or target environment
 
-- Confirm target server OS is Ubuntu 24.04 LTS.
-- Real `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, and `JIRA_URL` values (to be configured in `/etc/dztgbot/env`).
-- User Personal Access Tokens (PATs) submitted via `/auth` in private Telegram chat with the bot.
-- If L2TP/IPsec VPN is required, the private `.nmconnection` profile installed at mode 0600 on the server.
+None. Server environment and user credentials store are operational.
 
 ## Do not redo
 
-- Do not rewrite `user_store.py`, `jira_client.py`, `analysis.py`, or `jira_auth.py` — they are fully implemented and verified.
-- Do not re-add `GEMINI_MODEL` env var requirement — model selection is managed automatically with free-tier rate-limit fallback.
-- Do not hardcode Jira credentials or tokens in tracked files.
-- Do not remove Ubuntu 24.04 platform checks.
+- Do not re-run Netplan or NetworkManager interface setup; `enp0s3` is already managed and split tunneling is verified.
+- Do not remove `_ensure_vpn()` calls in `JiraClient`.
 
 ## Required verification on resume
 
-1. Confirm 30 offline tests pass (`$env:PYTHONPATH="src;."; .venv\Scripts\pytest`).
-2. Run `python scripts/handoff.py validate` to verify secret safety and context boundaries.
-3. Follow the deployment guide to test live on Ubuntu 24.04.
+- Run `.venv/bin/python -m unittest discover -s tests -v` to ensure test suite remains green.
+- Verify `sudo systemctl status dztgbot.service` is active on the target server.
