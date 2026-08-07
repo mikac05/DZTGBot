@@ -251,6 +251,41 @@ class PreviewTests(unittest.TestCase):
     def test_media_enum_serializes_to_expected_value(self) -> None:
         self.assertEqual(MediaType.PHOTO.value, "photo")
 
+    def test_editable_text_and_parser(self) -> None:
+        from dztgbot.analysis import jira_template_editable_text, parse_edited_template
+        original = JiraTaskTemplate(
+            summary="Original Summary",
+            description="Original Description",
+            issuetype="Task",
+            labels=["test"],
+            priority="Medium",
+            project_key="NGSSA3",
+            components=[],
+            assignee=None,
+            acceptance_criteria=["Criterion 1"],
+        )
+        editable = jira_template_editable_text(original)
+        self.assertIn("标题: Original Summary", editable)
+
+        edited_input = (
+            "标题: Modified Summary\n"
+            "类型: 缺陷\n"
+            "项目: NGSSA3\n"
+            "优先级: High\n"
+            "描述:\n"
+            "Modified Description line 1\n"
+            "Modified Description line 2\n\n"
+            "验收标准:\n"
+            "- New Criterion 1\n"
+            "- New Criterion 2"
+        )
+        parsed = parse_edited_template(edited_input, original)
+        self.assertEqual(parsed.summary, "Modified Summary")
+        self.assertEqual(parsed.issuetype, "缺陷")
+        self.assertEqual(parsed.priority, "High")
+        self.assertIn("Modified Description line 1", parsed.description)
+        self.assertEqual(parsed.acceptance_criteria, ["New Criterion 1", "New Criterion 2"])
+
 
 class GeminiAnalyzerTests(unittest.IsolatedAsyncioTestCase):
     async def test_valid_structured_response_is_locally_validated(self) -> None:

@@ -191,3 +191,92 @@ def jira_template_preview(template: JiraTaskTemplate) -> str:
         f"**详细描述 (Description)**:\n{description}\n\n"
         f"**验收标准 (Acceptance Criteria)**:\n{acceptance}"
     )[:4000]
+
+
+def jira_template_editable_text(template: JiraTaskTemplate) -> str:
+    """Format template as raw editable text block for Telegram text input."""
+    ac_text = "\n".join(f"- {item}" for item in template.acceptance_criteria)
+    return (
+        f"标题: {template.summary}\n"
+        f"类型: {template.issuetype}\n"
+        f"项目: {template.project_key or 'NGSSA3'}\n"
+        f"优先级: {template.priority}\n"
+        f"描述:\n{template.description}\n\n"
+        f"验收标准:\n{ac_text}"
+    )
+
+
+def parse_edited_template(raw_text: str, original: JiraTaskTemplate) -> JiraTaskTemplate:
+    """Parse user's edited text block back into an updated JiraTaskTemplate."""
+    summary = original.summary
+    issuetype = original.issuetype
+    project_key = original.project_key
+    priority = original.priority
+    description = original.description
+    acceptance_criteria = list(original.acceptance_criteria)
+    labels = list(original.labels)
+    components = list(original.components)
+    assignee = original.assignee
+
+    lines = raw_text.strip().splitlines()
+    desc_lines: list[str] = []
+    ac_lines: list[str] = []
+    mode = "header"
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if mode == "desc":
+                desc_lines.append("")
+            elif mode == "ac":
+                ac_lines.append("")
+            continue
+
+        lower_line = stripped.lower()
+        if lower_line.startswith("描述:") or lower_line.startswith("描述：") or lower_line.startswith("description:"):
+            mode = "desc"
+            content = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+            if content:
+                desc_lines.append(content)
+            continue
+        elif lower_line.startswith("验收标准:") or lower_line.startswith("验收标准：") or lower_line.startswith("acceptance criteria:"):
+            mode = "ac"
+            content = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+            if content:
+                ac_lines.append(content)
+            continue
+
+        if mode == "header":
+            if line.startswith("标题:") or line.startswith("标题：") or lower_line.startswith("summary:"):
+                summary = line.split(":", 1)[-1].split("：", 1)[-1].strip() or summary
+            elif line.startswith("类型:") or line.startswith("类型：") or lower_line.startswith("type:") or lower_line.startswith("issuetype:"):
+                issuetype = line.split(":", 1)[-1].split("：", 1)[-1].strip() or issuetype
+            elif line.startswith("项目:") or line.startswith("项目：") or lower_line.startswith("project:"):
+                project_key = line.split(":", 1)[-1].split("：", 1)[-1].strip() or project_key
+            elif line.startswith("优先级:") or line.startswith("优先级：") or lower_line.startswith("priority:"):
+                priority = line.split(":", 1)[-1].split("：", 1)[-1].strip() or priority
+            else:
+                mode = "desc"
+                desc_lines.append(line)
+        elif mode == "desc":
+            desc_lines.append(line)
+        elif mode == "ac":
+            if line.startswith("- ") or line.startswith("* "):
+                ac_lines.append(line[2:].strip())
+            else:
+                ac_lines.append(line)
+
+    final_desc = "\n".join(desc_lines).strip() or original.description
+    final_ac = [ac.strip() for ac in ac_lines if ac.strip()] or original.acceptance_criteria
+
+    return JiraTaskTemplate(
+        summary=summary,
+        description=final_desc,
+        issuetype=issuetype,
+        labels=labels,
+        priority=priority,
+        project_key=project_key,
+        components=components,
+        assignee=assignee,
+        acceptance_criteria=final_ac,
+    )

@@ -300,6 +300,9 @@ def build_forward_handlers(
                                     "\u2705 创建 Jira 工单", callback_data="jira_confirm"
                                 ),
                                 InlineKeyboardButton(
+                                    "\u270f\ufe0f 编辑草稿", callback_data="jira_edit"
+                                ),
+                                InlineKeyboardButton(
                                     "\u274c 取消", callback_data="jira_cancel"
                                 ),
                             ]
@@ -312,10 +315,56 @@ def build_forward_handlers(
 
                 asyncio.create_task(batch_worker())
 
+    async def handle_edited_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Process user's edited text block when editing_draft is active."""
+        if context.user_data is None or not context.user_data.get("editing_draft"):
+            return
+
+        incoming = update.effective_message
+        if incoming is None or not incoming.text:
+            return
+
+        if forwarded_message_in(incoming) is not None:
+            return
+
+        original_template = context.user_data.get("pending_template")
+        if original_template is None:
+            context.user_data["editing_draft"] = False
+            return
+
+        from .analysis import jira_template_preview, parse_edited_template
+
+        updated_template = parse_edited_template(incoming.text, original_template)
+        context.user_data["pending_template"] = updated_template
+        context.user_data["editing_draft"] = False
+
+        preview = jira_template_preview(updated_template)
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "\u2705 创建 Jira 工单", callback_data="jira_confirm"
+                    ),
+                    InlineKeyboardButton(
+                        "\u270f\ufe0f 编辑草稿", callback_data="jira_edit"
+                    ),
+                    InlineKeyboardButton(
+                        "\u274c 取消", callback_data="jira_cancel"
+                    ),
+                ]
+            ]
+        )
+        await incoming.reply_text(
+            f"\u2705 **草稿已更新！**\n\n{preview}",
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+
     async def handle_issue_callback(
         update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle the Create Issue / Cancel inline-button press."""
+        """Handle the Create Issue / Edit / Cancel inline-button press."""
 
         query = update.callback_query
         user = update.effective_user
@@ -325,12 +374,35 @@ def build_forward_handlers(
         await query.answer()
 
         if query.data == "jira_cancel":
+            if context.user_data is not None:
+                context.user_data["editing_draft"] = False
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
             if query.message is not None:
                 await query.message.reply_text("已取消工单创建。")
+            return
+
+        if query.data == "jira_edit":
+            if context.user_data is None:
+                return
+            template = context.user_data.get("pending_template")
+            if template is None:
+                if query.message is not None:
+                    await query.message.reply_text("未找到待编辑的工单草稿。")
+                return
+
+            context.user_data["editing_draft"] = True
+            from .analysis import jira_template_editable_text
+
+            editable_text = jira_template_editable_text(template)
+            if query.message is not None:
+                await query.message.reply_text(
+                    "✏️ **请点击/复制下方代码框内的完整文字，修改后再直接发送给机器人：**\n\n"
+                    f"```\n{editable_text}\n```",
+                    parse_mode="Markdown",
+                )
             return
 
         if query.data != "jira_confirm":
@@ -387,7 +459,8 @@ def build_forward_handlers(
 
     return (
         MessageHandler(ForwardOrReplyToForwardFilter(), analyze_forward),
+        MessageHandler(filters.TEXT & (~filters.COMMAND), handle_edited_text_input),
         CallbackQueryHandler(
-            handle_issue_callback, pattern=r"^jira_(confirm|cancel)$"
+            handle_issue_callback, pattern=r"^jira_(confirm|edit|cancel)$"
         ),
     )
