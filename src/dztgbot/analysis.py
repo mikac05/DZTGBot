@@ -226,7 +226,7 @@ class GeminiAnalyzer:
         return "\n".join(parts)
 
 
-def jira_template_preview(template: JiraTaskTemplate) -> str:
+def jira_template_preview(template: JiraTaskTemplate, image_count: int = 0) -> str:
     """Render a bounded, human-readable preview in Chinese for Telegram."""
 
     description = template.description
@@ -241,6 +241,8 @@ def jira_template_preview(template: JiraTaskTemplate) -> str:
     if len(acceptance) > 1200:
         acceptance = f"{acceptance[:1197]}..."
 
+    img_text = f"{image_count} 張圖片" if image_count > 0 else "無"
+
     return (
         "📋 **Jira 工單草稿預覽**（尚未建立）\n\n"
         f"**標題 (Summary)**: {template.summary}\n"
@@ -249,7 +251,8 @@ def jira_template_preview(template: JiraTaskTemplate) -> str:
         f"**專案 (Project)**: {template.project_key or '未指定'}\n"
         f"**經辦人 (Assignee)**: {template.assignee or '未指定'}\n"
         f"**標籤 (Labels)**: {labels}\n"
-        f"**模組 (Components)**: {components}\n\n"
+        f"**模組 (Components)**: {components}\n"
+        f"**附圖 (Attachments)**: {img_text}\n\n"
         f"**詳細描述 (Description)**:\n{description}\n\n"
         f"**驗收標準 (Acceptance Criteria)**:\n{acceptance}"
     )[:4000]

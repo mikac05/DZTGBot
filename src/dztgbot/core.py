@@ -293,7 +293,8 @@ def build_forward_handlers(
 
                     from .analysis import jira_template_preview
 
-                    preview = jira_template_preview(template)
+                    photo_count = len(context.user_data.get("pending_photo_file_ids", []))
+                    preview = jira_template_preview(template, photo_count)
                     context.user_data["pending_template"] = template
 
                     credentials = await user_store.get(user.id)
@@ -328,15 +329,23 @@ def build_forward_handlers(
                         [
                             [
                                 InlineKeyboardButton(
+                                    f"🏷️ 類型: {template.issuetype}", callback_data="jira_toggle_type"
+                                ),
+                                InlineKeyboardButton(
+                                    f"⚡ 優先級: {template.priority}", callback_data="jira_toggle_priority"
+                                ),
+                            ],
+                            [
+                                InlineKeyboardButton(
                                     "\u2705 建立 Jira 工單", callback_data="jira_confirm"
                                 ),
                                 InlineKeyboardButton(
-                                    "\u270f\ufe0f 編輯草稿", callback_data="jira_edit"
+                                    "\u270f\ufe0f 完整修改", callback_data="jira_edit"
                                 ),
                                 InlineKeyboardButton(
                                     "\u274c 取消", callback_data="jira_cancel"
                                 ),
-                            ]
+                            ],
                         ]
                     )
                     await incoming.reply_text(
@@ -353,7 +362,55 @@ def build_forward_handlers(
         if incoming is None or context.user_data is None:
             return
 
-        from .analysis import JiraTaskTemplate, jira_template_editable_text
+        from .analysis import JiraTaskTemplate, jira_template_preview
+
+        # Quick command format: /new <title text>
+        quick_title = " ".join(context.args).strip() if context.args else ""
+
+        if quick_title:
+            template = JiraTaskTemplate(
+                summary=quick_title[:255],
+                description=quick_title,
+                issuetype="Task",
+                labels=["telegram-intake"],
+                priority="Medium",
+                project_key="NGSSA3",
+                components=[],
+                assignee=None,
+                acceptance_criteria=[],
+            )
+            context.user_data["pending_template"] = template
+            photo_count = len(context.user_data.get("pending_photo_file_ids", []))
+            preview = jira_template_preview(template, photo_count)
+
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            f"🏷️ 類型: {template.issuetype}", callback_data="jira_toggle_type"
+                        ),
+                        InlineKeyboardButton(
+                            f"⚡ 優先級: {template.priority}", callback_data="jira_toggle_priority"
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "\u2705 建立 Jira 工單", callback_data="jira_confirm"
+                        ),
+                        InlineKeyboardButton(
+                            "\u270f\ufe0f 完整修改", callback_data="jira_edit"
+                        ),
+                        InlineKeyboardButton(
+                            "\u274c 取消", callback_data="jira_cancel"
+                        ),
+                    ],
+                ]
+            )
+            await incoming.reply_text(
+                f"{preview}",
+                reply_markup=keyboard,
+            )
+            return
 
         default_template = JiraTaskTemplate(
             summary="",
@@ -370,11 +427,12 @@ def build_forward_handlers(
         context.user_data["editing_draft"] = True
         context.user_data["editing_draft_time"] = time.monotonic()
 
-        blank_editable = jira_template_editable_text(default_template)
         await incoming.reply_text(
             "📝 <b>手動建立 Jira 工單</b>\n\n"
-            "請點擊或複製下方框內文字，在輸入框中填入各個欄位內容後發送給機器人：\n\n"
-            f"<pre><code>{html.escape(blank_editable)}</code></pre>",
+            "請直接回覆您要建立的工單內容：\n"
+            "• <b>第一行</b>：工單標題\n"
+            "• <b>後續行數</b>：詳細描述（可附帶圖片）\n\n"
+            "💡 <i>快捷技巧：您也可以直接輸入 <code>/new 工單標題</code> 一鍵建立草稿！</i>",
             parse_mode="HTML",
         )
 
@@ -407,7 +465,7 @@ def build_forward_handlers(
             context.user_data.pop("editing_draft_time", None)
             await incoming.reply_text(
                 "⏰ 編輯已逾時（超過 15 分鐘），草稿已保存。\n"
-                "如需繼續編輯，請重新點擊 [✏️ 編輯草稿] 或使用 /new。"
+                "如需繼續編輯，請重新點擊 [✏️ 完整修改] 或使用 /new。"
             )
             return
 
@@ -430,7 +488,26 @@ def build_forward_handlers(
                 acceptance_criteria=[],
             )
 
-        updated_template = parse_edited_template(text_content, original_template)
+        # Smart Natural Text Intake vs Formatted Block Intake
+        raw = text_content.strip()
+        lower_raw = raw.lower()
+        if any(lower_raw.startswith(p) for p in ("標題:", "標題：", "标题:", "标题：", "summary:")):
+            updated_template = parse_edited_template(text_content, original_template)
+        else:
+            lines = raw.splitlines()
+            parsed_summary = lines[0].strip() if lines else original_template.summary
+            parsed_desc = "\n".join(lines[1:]).strip() if len(lines) > 1 else parsed_summary
+            updated_template = JiraTaskTemplate(
+                summary=parsed_summary or original_template.summary or "未命名工單",
+                description=parsed_desc or original_template.description or parsed_summary or "無詳細描述",
+                issuetype=original_template.issuetype,
+                labels=original_template.labels,
+                priority=original_template.priority,
+                project_key=original_template.project_key,
+                components=original_template.components,
+                assignee=original_template.assignee,
+                acceptance_criteria=original_template.acceptance_criteria,
+            )
 
         # Validate template fields
         validation_errors = validate_template_fields(updated_template)
@@ -509,21 +586,30 @@ def build_forward_handlers(
         context.user_data["pending_template"] = updated_template
         context.user_data["editing_draft"] = False
 
-        preview = jira_template_preview(updated_template)
+        photo_count = len(context.user_data.get("pending_photo_file_ids", []))
+        preview = jira_template_preview(updated_template, photo_count)
 
         keyboard = InlineKeyboardMarkup(
             [
                 [
                     InlineKeyboardButton(
+                        f"🏷️ 類型: {updated_template.issuetype}", callback_data="jira_toggle_type"
+                    ),
+                    InlineKeyboardButton(
+                        f"⚡ 優先級: {updated_template.priority}", callback_data="jira_toggle_priority"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
                         "\u2705 建立 Jira 工單", callback_data="jira_confirm"
                     ),
                     InlineKeyboardButton(
-                        "\u270f\ufe0f 編輯草稿", callback_data="jira_edit"
+                        "\u270f\ufe0f 完整修改", callback_data="jira_edit"
                     ),
                     InlineKeyboardButton(
                         "\u274c 取消", callback_data="jira_cancel"
                     ),
-                ]
+                ],
             ]
         )
         await incoming.reply_text(
@@ -620,6 +706,85 @@ def build_forward_handlers(
                     f"<pre><code>{html.escape(editable_text)}</code></pre>",
                     parse_mode="HTML",
                 )
+            return
+
+        if query.data in ("jira_toggle_type", "jira_toggle_priority"):
+            if context.user_data is None:
+                return
+            template = context.user_data.get("pending_template")
+            if template is None:
+                if query.message is not None:
+                    await query.message.reply_text("未找到待編輯的工單草稿。")
+                return
+
+            from .analysis import JiraTaskTemplate, jira_template_preview
+
+            if query.data == "jira_toggle_type":
+                types = ["Task", "Epic", "缺陷", "優化"]
+                cur_idx = types.index(template.issuetype) if template.issuetype in types else 0
+                new_type = types[(cur_idx + 1) % len(types)]
+                updated_template = JiraTaskTemplate(
+                    summary=template.summary,
+                    description=template.description,
+                    issuetype=new_type,
+                    labels=template.labels,
+                    priority=template.priority,
+                    project_key=template.project_key,
+                    components=template.components,
+                    assignee=template.assignee,
+                    acceptance_criteria=template.acceptance_criteria,
+                )
+            else:  # jira_toggle_priority
+                priorities = ["Medium", "High", "Highest", "Low", "Lowest"]
+                cur_idx = priorities.index(template.priority) if template.priority in priorities else 0
+                new_priority = priorities[(cur_idx + 1) % len(priorities)]
+                updated_template = JiraTaskTemplate(
+                    summary=template.summary,
+                    description=template.description,
+                    issuetype=template.issuetype,
+                    labels=template.labels,
+                    priority=new_priority,
+                    project_key=template.project_key,
+                    components=template.components,
+                    assignee=template.assignee,
+                    acceptance_criteria=template.acceptance_criteria,
+                )
+
+            context.user_data["pending_template"] = updated_template
+            photo_count = len(context.user_data.get("pending_photo_file_ids", []))
+            preview = jira_template_preview(updated_template, photo_count)
+
+            keyboard = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton(
+                            f"🏷️ 類型: {updated_template.issuetype}", callback_data="jira_toggle_type"
+                        ),
+                        InlineKeyboardButton(
+                            f"⚡ 優先級: {updated_template.priority}", callback_data="jira_toggle_priority"
+                        ),
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "\u2705 建立 Jira 工單", callback_data="jira_confirm"
+                        ),
+                        InlineKeyboardButton(
+                            "\u270f\ufe0f 完整修改", callback_data="jira_edit"
+                        ),
+                        InlineKeyboardButton(
+                            "\u274c 取消", callback_data="jira_cancel"
+                        ),
+                    ],
+                ]
+            )
+            if query.message is not None:
+                try:
+                    await query.message.edit_text(
+                        f"📋 **Jira 工單草稿預覽**（已更新）\n\n{preview}",
+                        reply_markup=keyboard,
+                    )
+                except Exception:
+                    pass
             return
 
         if query.data != "jira_confirm":
@@ -730,6 +895,6 @@ def build_forward_handlers(
         MessageHandler(ForwardOrReplyToForwardFilter(), analyze_forward),
         MessageHandler((filters.TEXT | filters.PHOTO) & (~filters.COMMAND), handle_edited_text_input),
         CallbackQueryHandler(
-            handle_issue_callback, pattern=r"^jira_(confirm|edit|cancel|copylink|copysummary|editpublished)$"
+            handle_issue_callback, pattern=r"^jira_(confirm|edit|cancel|copylink|copysummary|editpublished|toggle_type|toggle_priority)$"
         ),
     )

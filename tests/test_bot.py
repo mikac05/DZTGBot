@@ -308,6 +308,25 @@ class JiraClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Modified Description line 1", parsed.description)
         self.assertEqual(parsed.acceptance_criteria, ["New Criterion 1", "New Criterion 2"])
 
+    def test_preview_includes_image_count(self) -> None:
+        from dztgbot.analysis import JiraTaskTemplate, jira_template_preview
+        template = JiraTaskTemplate(
+            summary="Image Test",
+            description="Testing images",
+            issuetype="Task",
+            labels=["test"],
+            priority="Medium",
+            project_key="NGSSA3",
+            components=[],
+            assignee=None,
+            acceptance_criteria=[],
+        )
+        preview_with_images = jira_template_preview(template, image_count=3)
+        self.assertIn("附圖 (Attachments)**: 3 張圖片", preview_with_images)
+
+        preview_no_images = jira_template_preview(template, image_count=0)
+        self.assertIn("附圖 (Attachments)**: 無", preview_no_images)
+
     def test_validate_template_fields(self) -> None:
         from dztgbot.analysis import validate_template_fields
         invalid_template = JiraTaskTemplate(
