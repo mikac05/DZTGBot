@@ -2,13 +2,19 @@
 # These rules guide how Gemini classifies and structures Jira issues
 # from forwarded Telegram messages. Update at runtime via /setrules.
 
-Default project key: TODO_SET_YOUR_PROJECT_KEY
+Default Jira Project Key: NGSSA3
 
-Classification guidance:
-- Messages about errors, crashes, or broken functionality → Bug
-- Messages requesting new features or changes → Story
-- Routine work items, action items, follow-ups → Task
-- Enhancements to existing features → Improvement
+Allowed Issue Types for Project NGSSA3:
+- Task: 常规任务、日常需求与一般工作
+- Epic: 大型长周期战略目标或宏大需求
+- 缺陷: 程序错误、Bug、崩溃或功能异常
+- 优化: 现有功能的改善、性能提升或体验优化
+
+Rule Priority:
+- For error logs, bugs, or crashes: use "缺陷"
+- For performance, UI/UX, or code improvements: use "优化"
+- For general tasks or features: use "Task"
+- For large initiatives: use "Epic"
 
 Priority signals:
 - "urgent", "critical", "blocking", "production down" → High or Highest
