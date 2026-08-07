@@ -71,16 +71,12 @@ class MediaType(StrEnum):
     UNKNOWN = "unknown"
 
 
-def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
-    """Return the persistent 2-row main menu bottom keyboard."""
-    return ReplyKeyboardMarkup(
-        [
-            [KeyboardButton("📝 手動建立 Jira 工單")],
-            [KeyboardButton("🔑 綁定 Jira 帳號"), KeyboardButton("🚪 解綁 Jira 帳號")],
-        ],
-        resize_keyboard=True,
-        is_persistent=True,
-    )
+async def get_main_menu_keyboard(
+    user_id: int | None, user_store: "UserStore"
+) -> ReplyKeyboardMarkup:
+    """Return dynamic 2-row main menu keyboard with auth status and help button."""
+    from .jira_auth import get_main_menu_keyboard as auth_get_keyboard
+    return await auth_get_keyboard(user_id, user_store)
 
 
 def get_draft_keyboard() -> ReplyKeyboardMarkup:
@@ -492,12 +488,14 @@ def build_forward_handlers(
 
         raw = text_content.strip()
 
+        user = update.effective_user
         if raw in ("❌ 取消草稿", "❌ 取消"):
             context.user_data["editing_draft"] = False
             context.user_data.pop("editing_draft_time", None)
             context.user_data.pop("pending_template", None)
             context.user_data.pop("pending_photo_file_ids", None)
-            await incoming.reply_text("已取消草稿。", reply_markup=get_main_menu_keyboard())
+            main_menu = await get_main_menu_keyboard(user.id if user else None, user_store)
+            await incoming.reply_text("已取消草稿。", reply_markup=main_menu)
             return
 
         if raw == "✅ 確定提交工單":
@@ -521,10 +519,11 @@ def build_forward_handlers(
         if draft_start and (time.monotonic() - draft_start) > EDITING_TIMEOUT_SECONDS:
             context.user_data["editing_draft"] = False
             context.user_data.pop("editing_draft_time", None)
+            main_menu = await get_main_menu_keyboard(user.id if user else None, user_store)
             await incoming.reply_text(
                 "⏰ 編輯已逾時（超過 15 分鐘），草稿已保存。\n"
                 "如需繼續編輯，請重新點擊 [✏️ 完整修改] 或使用 /new。",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=main_menu,
             )
             return
 
@@ -723,7 +722,8 @@ def build_forward_handlers(
             except Exception:
                 pass
             if query.message is not None:
-                await query.message.reply_text("已取消操作。", reply_markup=get_main_menu_keyboard())
+                main_menu = await get_main_menu_keyboard(user.id if user else None, user_store)
+                await query.message.reply_text("已取消操作。", reply_markup=main_menu)
             return
 
         if query.data == "jira_copylink":

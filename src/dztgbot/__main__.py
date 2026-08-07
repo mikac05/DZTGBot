@@ -72,6 +72,7 @@ async def run() -> None:
                     BotCommand("new", "📝 手動建立 Jira 工單"),
                     BotCommand("auth", "🔑 綁定 Jira 帳號"),
                     BotCommand("logout", "🚪 解綁 Jira 帳號"),
+                    BotCommand("help", "📖 查看使用說明"),
                 ]
             )
         except Exception as err:
@@ -86,14 +87,21 @@ async def run() -> None:
     )
     application.add_error_handler(handle_application_error)
 
-    auth_conversation, start_handler, logout_handler = build_auth_handlers(
+    auth_conversation, start_handler, logout_handler, help_handler = build_auth_handlers(
         user_store, jira_client, settings.jira_url
     )
+    from telegram.ext import MessageHandler, filters
+    logout_button_handler = MessageHandler(filters.Regex(r"^(🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_handler.callback)
+    help_button_handler = MessageHandler(filters.Regex(r"^(📖 說明|📖 说明)$"), help_handler.callback)
+
     application.add_handlers(
         [
             auth_conversation,
             start_handler,
             logout_handler,
+            logout_button_handler,
+            help_handler,
+            help_button_handler,
             *build_admin_handlers(
                 rules_store,
                 settings.telegram_admin_user_ids,

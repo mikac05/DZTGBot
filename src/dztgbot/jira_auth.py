@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from telegram import ReplyKeyboardMarkup, Update
+from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     BaseHandler,
     CommandHandler,
@@ -22,14 +22,37 @@ LOGGER = logging.getLogger(__name__)
 AWAITING_PAT = 0
 
 
+async def get_main_menu_keyboard(
+    user_id: int | None, user_store: UserStore
+) -> ReplyKeyboardMarkup:
+    """Build a dynamic 2-row main menu keyboard based on user's auth status."""
+    is_authed = False
+    if user_id is not None:
+        credentials = await user_store.get(user_id)
+        is_authed = credentials is not None
+
+    auth_button = (
+        KeyboardButton("🚪 解綁 Jira 帳號")
+        if is_authed
+        else KeyboardButton("🔑 綁定 Jira 帳號")
+    )
+
+    return ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("📝 手動建立 Jira 工單")],
+            [auth_button, KeyboardButton("📖 說明")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
 def build_auth_handlers(
     user_store: UserStore,
     jira_client: JiraClient,
     jira_url: str,
-) -> tuple[ConversationHandler, BaseHandler, BaseHandler]:
-    """Build /start, /auth conversation, and /logout handlers."""
-
-    jira_host = jira_url.split("://", 1)[-1].split("/", 1)[0]
+) -> tuple[ConversationHandler, BaseHandler, BaseHandler, BaseHandler]:
+    """Build /start, /auth conversation, /logout, and /help handlers."""
 
     async def start_command(
         update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -41,35 +64,51 @@ def build_auth_handlers(
         if message is None or user is None:
             return
 
-        keyboard = ReplyKeyboardMarkup(
-            [
-                [KeyboardButton("📝 手動建立 Jira 工單")],
-                [KeyboardButton("🔑 綁定 Jira 帳號"), KeyboardButton("🚪 解綁 Jira 帳號")],
-            ],
-            resize_keyboard=True,
-            is_persistent=True,
-        )
-
+        keyboard = await get_main_menu_keyboard(user.id, user_store)
         credentials = await user_store.get(user.id)
         if credentials:
             await message.reply_text(
-                f"👋 歡迎使用 DZTGBot！目前綁定的 Jira 帳號: "
-                f'"{credentials.jira_display_name}" '
-                f"({credentials.jira_username})。\n\n"
-                "您可以直接轉發訊息給機器人生成工單，或點擊下方按鈕手動建立。\n\n"
-                "常用指令：\n"
-                "/new — 📝 手動建立 Jira 工單\n"
-                "/auth — 🔑 重新綁定 Jira 帳號\n"
-                "/logout — 🚪 解綁 Jira 帳號",
+                f"👋 歡迎使用 DZTGBot！\n"
+                f"目前綁定帳號：<b>{html_escape(credentials.jira_display_name)}</b> ({html_escape(credentials.jira_username)})\n\n"
+                "可以直接轉發 Telegram 訊息生成工單，或點擊下方按鈕開始使用。",
                 reply_markup=keyboard,
+                parse_mode="HTML",
             )
         else:
             await message.reply_text(
                 "👋 歡迎使用 DZTGBot！\n\n"
-                "轉發任何訊息給機器人，或點擊下方 [📝 手動建立 Jira 工單] 按鈕即可快速建立 Jira 工單。\n\n"
-                "使用前請先點擊下方 [🔑 綁定 Jira 帳號] 或發送 /auth 綁定您的帳號。",
+                "請先點擊下方 <b>[🔑 綁定 Jira 帳號]</b> 完成綁定，即可轉發訊息或點擊 <b>[📝 手動建立 Jira 工單]</b> 快速發單。",
                 reply_markup=keyboard,
+                parse_mode="HTML",
             )
+
+    async def help_command(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Display short, clear usage instructions in Taiwan Traditional Chinese."""
+
+        message = update.effective_message
+        user = update.effective_user
+        if message is None:
+            return
+
+        keyboard = await get_main_menu_keyboard(user.id if user else None, user_store)
+        await message.reply_text(
+            "📖 <b>DZTGBot 使用說明</b>\n\n"
+            "1️⃣ <b>訊息轉發建單（推薦）</b>：\n"
+            "直接將 Telegram 訊息轉發給機器人，AI 自動分析並生成 Jira 工單草稿。\n\n"
+            "2️⃣ <b>手動快速建單</b>：\n"
+            "• 點擊 <code>[📝 手動建立 Jira 工單]</code>\n"
+            "• 或輸入 <code>/new 工單標題</code> 快速建立\n"
+            "• 或直接發送訊息（第一行為標題，後續為描述，可附圖片）\n\n"
+            "3️⃣ <b>常用指令</b>：\n"
+            "/new — 📝 手動建立工單\n"
+            "/auth — 🔑 綁定 Jira 帳號 (PAT)\n"
+            "/logout — 🚪 解綁 Jira 帳號\n"
+            "/help — 📖 查看使用說明",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
 
     async def auth_entry(
         update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -145,13 +184,15 @@ def build_auth_handlers(
         )
         await user_store.store(user.id, credentials)
 
+        keyboard = await get_main_menu_keyboard(user.id, user_store)
         await status_message.edit_text(
             f"✅ <b>Jira 帳號綁定成功！</b>\n\n"
-            f"已成功驗證身份：<b>{jira_user.display_name}</b> ({jira_user.username})\n\n"
-            "您可以直接轉發訊息給機器人生成工單，或點擊下方 [📝 手動建立 Jira 工單] 按鈕。\n\n"
-            "如需解綁請隨時發送 /logout。",
+            f"已驗證身份：<b>{html_escape(jira_user.display_name)}</b> ({html_escape(jira_user.username)})\n\n"
+            "您現在可以直接轉發訊息或點擊下方按鈕建立工單。",
             parse_mode="HTML",
         )
+        # Send main menu with updated keyboard (shows 🚪 解綁 Jira 帳號)
+        await chat.send_message("功能表已更新：", reply_markup=keyboard)
 
         LOGGER.info(
             "Telegram user %s authenticated as Jira user %s",
@@ -166,8 +207,10 @@ def build_auth_handlers(
         """Cancel the auth conversation."""
 
         message = update.effective_message
+        user = update.effective_user
         if message is not None:
-            await message.reply_text("已取消 Jira 帳號綁定操作。")
+            keyboard = await get_main_menu_keyboard(user.id if user else None, user_store)
+            await message.reply_text("已取消 Jira 帳號綁定操作。", reply_markup=keyboard)
         return ConversationHandler.END
 
     async def logout_command(
@@ -181,14 +224,17 @@ def build_auth_handlers(
             return
 
         removed = await user_store.remove(user.id)
+        keyboard = await get_main_menu_keyboard(user.id, user_store)
         if removed:
             await message.reply_text(
-                "🚪 <b>已成功解綁！</b>\n\n您的 Jira 認證資訊已安全清除。如需重新綁定請發送 /auth。",
+                "🚪 <b>已成功解綁！</b>\n\n您的 Jira 認證資訊已安全清除。如需重新綁定請點擊下方按鈕或發送 /auth。",
+                reply_markup=keyboard,
                 parse_mode="HTML",
             )
         else:
             await message.reply_text(
-                "未檢測到您已綁定的 Jira 帳號。"
+                "未檢測到您已綁定的 Jira 帳號。",
+                reply_markup=keyboard,
             )
 
     auth_conversation = ConversationHandler(
@@ -210,5 +256,10 @@ def build_auth_handlers(
         auth_conversation,
         CommandHandler("start", start_command),
         CommandHandler("logout", logout_command),
-        MessageHandler(filters.Regex(r"^(🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_command),
+        CommandHandler("help", help_command),
     )
+
+
+def html_escape(text: str) -> str:
+    import html
+    return html.escape(text)

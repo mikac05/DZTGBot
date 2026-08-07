@@ -143,6 +143,28 @@ class UserStoreTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await store.get(12345))
             self.assertFalse(await store.remove(12345))
 
+    async def test_main_menu_keyboard_toggles_auth_button(self) -> None:
+        from dztgbot.jira_auth import get_main_menu_keyboard
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "creds.json"
+            store = UserStore(path)
+            await store.initialize()
+
+            # Unauthenticated -> shows 🔑 綁定 Jira 帳號
+            kbd_unauthed = await get_main_menu_keyboard(12345, store)
+            buttons_unauthed = [btn.text for row in kbd_unauthed.keyboard for btn in row]
+            self.assertIn("🔑 綁定 Jira 帳號", buttons_unauthed)
+            self.assertNotIn("🚪 解綁 Jira 帳號", buttons_unauthed)
+            self.assertIn("📖 說明", buttons_unauthed)
+
+            # Authenticated -> shows 🚪 解綁 Jira 帳號
+            await store.store(12345, JiraCredentials("user", "User", "pat"))
+            kbd_authed = await get_main_menu_keyboard(12345, store)
+            buttons_authed = [btn.text for row in kbd_authed.keyboard for btn in row]
+            self.assertIn("🚪 解綁 Jira 帳號", buttons_authed)
+            self.assertNotIn("🔑 綁定 Jira 帳號", buttons_authed)
+            self.assertIn("📖 說明", buttons_authed)
+
 
 class VpnTests(unittest.IsolatedAsyncioTestCase):
     @staticmethod
