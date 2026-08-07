@@ -87,6 +87,22 @@ class HandoffError(RuntimeError):
     """Raised when a handoff operation cannot proceed safely."""
 
 
+def _safe_git_error(stderr: str) -> str:
+    sanitized = re.sub(
+        r"(https?://)[^\s/@:]+:[^\s@]+@",
+        r"\1<redacted>@",
+        stderr,
+        flags=re.IGNORECASE,
+    )
+    sanitized = re.sub(
+        r"\b(?:gh[pousr]_|github_pat_|AIza)[A-Za-z0-9_-]+\b",
+        "<redacted-credential>",
+        sanitized,
+    )
+    lines = [line.strip() for line in sanitized.splitlines() if line.strip()]
+    return " ".join(lines[-2:])[:500]
+
+
 def _run_git(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment["GIT_TERMINAL_PROMPT"] = "0"
@@ -104,7 +120,11 @@ def _run_git(*arguments: str, check: bool = True) -> subprocess.CompletedProcess
     )
     if check and result.returncode != 0:
         command = "git " + " ".join(arguments[:2])
-        raise HandoffError(f"{command} failed with exit code {result.returncode}.")
+        detail = _safe_git_error(result.stderr)
+        suffix = f" {detail}" if detail else ""
+        raise HandoffError(
+            f"{command} failed with exit code {result.returncode}.{suffix}"
+        )
     return result
 
 

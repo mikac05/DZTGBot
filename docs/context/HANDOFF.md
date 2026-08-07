@@ -24,6 +24,7 @@ Make the production-oriented Telegram bot and its complete project state portabl
 
 ## Open items
 
+- The initial handoff is committed locally, but the currently authenticated Git identity does not have write permission to the configured `origin`; the remote was not changed.
 - The actual target distribution must be detected or confirmed because earlier planning mentioned both Ubuntu 22.04 and Oracle Linux 9.
 - Real Telegram/Gemini credentials and admin IDs have not been supplied and must remain outside Git.
 - Gemini prompts and Jira rules are intentionally placeholders pending approval.
@@ -32,7 +33,7 @@ Make the production-oriented Telegram bot and its complete project state portabl
 
 ## Exact next action
 
-Complete the initial safe Git push, then test `DZTGBot continue` from another account/application or clean clone. After continuity is verified, perform the first target-server installer pass described in `CONTINUE_HERE.md`.
+Grant the current Git identity write permission to the configured origin, or explicitly authorize changing `origin` to a repository it can write. Then run `DZTGBot handoff` again to push, and test `DZTGBot continue` from another account/application or clean clone. After continuity is verified, perform the first target-server installer pass described in `CONTINUE_HERE.md`.
 
 ## Verification
 
@@ -42,6 +43,7 @@ Complete the initial safe Git push, then test `DZTGBot continue` from another ac
 - The project-local handoff skill passed its structural validator.
 - Handoff context, ignore policy, and credential-pattern validation passed.
 - A dirty-checkout `continue` test refused to pull and preserved the working tree unchanged.
+- The initial commit succeeded locally; the push was safely retained as a blocker after GitHub denied write permission.
 
 ## Transfer limitations
 
@@ -50,10 +52,10 @@ Git does not transfer `.env`, private VPN files, tokens, keys, server access, Te
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-07T01:54:26Z`
+- Generated UTC: `2026-08-07T01:56:02Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `initial repository`
-- Working-tree entries before metadata refresh: `14`
+- Base commit before this handoff: `6209fca2081a`
+- Working-tree entries before metadata refresh: `3`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->
