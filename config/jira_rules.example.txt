@@ -1,26 +1,25 @@
-# DZTGBot Runtime Jira Rules
-# These rules guide how Gemini classifies and structures Jira issues
-# from forwarded Telegram messages. Update at runtime via /setrules.
+# DZTGBot 執行階段 Jira 規則 (Runtime Jira Rules)
+# 這些規則指引 Gemini 如何將轉發的 Telegram 訊息歸類與結構化生成 Jira 工單。
 
-Default Jira Project Key: NGSSA3
+預設專案 Key (Default Project Key): NGSSA3
 
-Allowed Issue Types for Project NGSSA3:
-- Task: 常规任务、日常需求与一般工作
-- Epic: 大型长周期战略目标或宏大需求
-- 缺陷: 程序错误、Bug、崩溃或功能异常
-- 优化: 现有功能的改善、性能提升或体验优化
+專案 NGSSA3 嚴格限制可使用的工單類型 (Allowed Issue Types for Project NGSSA3):
+- Task: 常規任務、日常需求與一般技術工作
+- Epic: 大型長週期戰略目標或宏大需求
+- 缺陷: 程式錯誤、Bug、崩潰或功能異常
+- 優化: 現有功能的改善、效能提升或體驗優化
 
-Rule Priority:
-- For error logs, bugs, or crashes: use "缺陷"
-- For performance, UI/UX, or code improvements: use "优化"
-- For general tasks or features: use "Task"
-- For large initiatives: use "Epic"
+工單類型歸類優先規則 (Classification Rules):
+- 遇到錯誤日誌、Bug 或崩潰問題：一律使用 "缺陷"
+- 遇到效能改善、UI/UX 體驗提升或程式碼重構：一律使用 "優化"
+- 遇到一般開發需求、技術任務或日常工作：一律使用 "Task"
+- 遇到大型長週期戰略專案：使用 "Epic"
 
-Priority signals:
-- "urgent", "critical", "blocking", "production down" → High or Highest
-- "when possible", "nice to have", "low priority" → Low
-- Unclear urgency → Medium
+優先級對應規則 (Priority Rules):
+- 含 "緊急", "重大", "阻礙發布", "生產環境故障" → High 或 Highest
+- 含 "空閒時做", "次要", "低優先級" → Low
+- 未指明緊急程度 → 預設 Medium
 
-Labeling:
-- Always include: telegram-intake
-- Add domain labels based on content (e.g. backend, frontend, infrastructure)
+標籤規範 (Labeling):
+- 必須包含標籤: telegram-intake
+- 根據內容新增領域標籤 (例如 backend, frontend, infrastructure)
