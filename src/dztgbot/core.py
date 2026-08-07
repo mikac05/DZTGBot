@@ -224,15 +224,15 @@ def build_forward_handlers(
             status_msg = context.user_data.get("batch_status_msg")
             if status_msg is None:
                 status_msg = await incoming.reply_text(
-                    f"\U0001f4e5 已接收 {batch_count} 条转发消息，等待合并...\n"
-                    "(2.5 秒内继续转发将合并为同一工单)"
+                    f"\U0001f4e5 已接收 {batch_count} 則轉發訊息，等待合併...\n"
+                    "(2.5 秒內繼續轉發將合併為同一工單)"
                 )
                 context.user_data["batch_status_msg"] = status_msg
             else:
                 try:
                     await status_msg.edit_text(
-                        f"\U0001f4e5 已接收 {batch_count} 条转发消息，等待合并...\n"
-                        "(2.5 秒内继续转发将合并为同一工单)"
+                        f"\U0001f4e5 已接收 {batch_count} 則轉發訊息，等待合併...\n"
+                        "(2.5 秒內繼續轉發將合併為同一工單)"
                     )
                 except Exception:
                     pass
@@ -260,7 +260,7 @@ def build_forward_handlers(
                     if current_status is not None:
                         try:
                             await current_status.edit_text(
-                                f"\U0001f916 正在分析 {len(current_batch)} 条转发消息，生成统一的 Jira 工单..."
+                                f"\U0001f916 正在分析 {len(current_batch)} 則轉發訊息，生成統一的 Jira 工單..."
                             )
                         except Exception:
                             pass
@@ -270,7 +270,7 @@ def build_forward_handlers(
                     except Exception as error:
                         LOGGER.error("Gemini analysis failed (%s: %s)", type(error).__name__, error)
                         await incoming.reply_text(
-                            "\u274c Gemini 分析失败或未返回有效结果，请稍后再试。"
+                            "\u274c Gemini 分析失敗或未傳回有效結果，請稍後再試。"
                         )
                         return
 
@@ -283,7 +283,7 @@ def build_forward_handlers(
                     if credentials is None:
                         await incoming.reply_text(
                             f"{preview}\n\n"
-                            "\u26a0\ufe0f 您尚未绑定 Jira 账号，请先在私聊中使用 /auth 进行绑定，然后再进行转发。"
+                            "\u26a0\ufe0f 您尚未綁定 Jira 帳號，請先在私聊視窗中使用 /auth 進行綁定，然後再進行轉發。"
                         )
                         return
 
@@ -291,17 +291,17 @@ def build_forward_handlers(
                     vpn_status = await vpn_manager.status()
                     if vpn_status.state in (VpnState.DOWN, VpnState.ERROR):
                         vpn_warning = (
-                            "\n\n\u26a0\ufe0f VPN 当前处于断开状态，创建工单可能会失败。"
+                            "\n\n\u26a0\ufe0f VPN 目前處於中斷狀態，建立工單可能會失敗。"
                         )
 
                     keyboard = InlineKeyboardMarkup(
                         [
                             [
                                 InlineKeyboardButton(
-                                    "\u2705 创建 Jira 工单", callback_data="jira_confirm"
+                                    "\u2705 建立 Jira 工單", callback_data="jira_confirm"
                                 ),
                                 InlineKeyboardButton(
-                                    "\u270f\ufe0f 编辑草稿", callback_data="jira_edit"
+                                    "\u270f\ufe0f 編輯草稿", callback_data="jira_edit"
                                 ),
                                 InlineKeyboardButton(
                                     "\u274c 取消", callback_data="jira_cancel"
@@ -317,7 +317,7 @@ def build_forward_handlers(
                 asyncio.create_task(batch_worker())
 
     async def new_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /new command or '📝 手动创建 Jira 工单' button press."""
+        """Handle /new command or '📝 手動建立 Jira 工單' button press."""
 
         incoming = update.effective_message
         if incoming is None or context.user_data is None:
@@ -341,8 +341,8 @@ def build_forward_handlers(
 
         blank_editable = jira_template_editable_text(default_template)
         await incoming.reply_text(
-            "📝 <b>手动创建 Jira 工单</b>\n\n"
-            "请点击/复制下方代码框内的完整文字，在输入框中填入各个字段内容后发送给机器人：\n\n"
+            "📝 <b>手動建立 Jira 工單</b>\n\n"
+            "請點擊或複製下方框內文字，在輸入框中填入各個欄位內容後發送給機器人：\n\n"
             f"<pre><code>{html.escape(blank_editable)}</code></pre>",
             parse_mode="HTML",
         )
@@ -354,7 +354,7 @@ def build_forward_handlers(
         if incoming is None or not incoming.text or context.user_data is None:
             return
 
-        if incoming.text.strip() in ("/new", "📝 手动创建 Jira 工单"):
+        if incoming.text.strip() in ("/new", "📝 手動建立 Jira 工單", "📝 手动创建 Jira 工单"):
             await new_issue_command(update, context)
             return
 
@@ -380,8 +380,6 @@ def build_forward_handlers(
                 acceptance_criteria=[],
             )
 
-        from .analysis import jira_template_preview, parse_edited_template, validate_template_fields
-
         updated_template = parse_edited_template(incoming.text, original_template)
 
         # Validate template fields
@@ -389,7 +387,7 @@ def build_forward_handlers(
         if validation_errors:
             error_msg = "\n".join(f"❌ {err}" for err in validation_errors)
             await incoming.reply_text(
-                f"⚠️ <b>工单内容不符合规范，请修正后重新发送：</b>\n\n{html.escape(error_msg)}",
+                f"⚠️ <b>工單內容不符合規範，請修正後重新發送：</b>\n\n{html.escape(error_msg)}",
                 parse_mode="HTML",
             )
             context.user_data["pending_template"] = updated_template
@@ -401,7 +399,7 @@ def build_forward_handlers(
         if published_key and user:
             credentials = await user_store.get(user.id)
             if credentials:
-                await incoming.reply_text(f"\U0001f504 正在更新 Jira 工单 {published_key}...")
+                await incoming.reply_text(f"\U0001f504 正在更新 Jira 工單 {published_key}...")
                 from .jira_client import JiraClientError
                 try:
                     res = await jira_client.update_issue(
@@ -418,28 +416,28 @@ def build_forward_handlers(
                         [
                             [
                                 InlineKeyboardButton(
-                                    "\U0001f517 仅复制链接", callback_data="jira_copylink"
+                                    "\U0001f517 僅複製連結", callback_data="jira_copylink"
                                 ),
                                 InlineKeyboardButton(
-                                    "\U0001f4cb 复制链接与摘要", callback_data="jira_copysummary"
+                                    "\U0001f4cb 複製連結與摘要", callback_data="jira_copysummary"
                                 ),
                             ],
                             [
                                 InlineKeyboardButton(
-                                    "\u270f\ufe0f 编辑此工单", callback_data="jira_editpublished"
+                                    "\u270f\ufe0f 編輯此工單", callback_data="jira_editpublished"
                                 ),
                             ],
                         ]
                     )
                     await incoming.reply_text(
-                        f"\u2705 <b>Jira 工单 {html.escape(res.key)} 更新成功！</b>\n{html.escape(res.url)}",
+                        f"\u2705 <b>Jira 工單 {html.escape(res.key)} 更新成功！</b>\n{html.escape(res.url)}",
                         reply_markup=keyboard,
                         parse_mode="HTML",
                     )
                     return
                 except JiraClientError as error:
                     LOGGER.error("Jira issue update failed (%s)", type(error).__name__)
-                    await incoming.reply_text(f"\u274c 工单更新失败: {html.escape(str(error))}")
+                    await incoming.reply_text(f"\u274c 工單更新失敗: {html.escape(str(error))}")
                     return
 
         context.user_data["pending_template"] = updated_template
@@ -451,10 +449,10 @@ def build_forward_handlers(
             [
                 [
                     InlineKeyboardButton(
-                        "\u2705 创建 Jira 工单", callback_data="jira_confirm"
+                        "\u2705 建立 Jira 工單", callback_data="jira_confirm"
                     ),
                     InlineKeyboardButton(
-                        "\u270f\ufe0f 编辑草稿", callback_data="jira_edit"
+                        "\u270f\ufe0f 編輯草稿", callback_data="jira_edit"
                     ),
                     InlineKeyboardButton(
                         "\u274c 取消", callback_data="jira_cancel"
@@ -497,7 +495,7 @@ def build_forward_handlers(
             if last_pub and query.message is not None:
                 url = last_pub["url"]
                 await query.message.reply_text(
-                    f"\U0001f517 <b>Jira 工单链接</b>（点击框内一键复制）：\n\n<pre><code>{html.escape(url)}</code></pre>",
+                    f"\U0001f517 <b>Jira 工單連結</b>（點擊框內一鍵複製）：\n\n<pre><code>{html.escape(url)}</code></pre>",
                     parse_mode="HTML",
                 )
             return
@@ -510,7 +508,7 @@ def build_forward_handlers(
                 url = last_pub["url"]
                 text_content = f"【{key}】{summary}\n{url}"
                 await query.message.reply_text(
-                    f"\U0001f4cb <b>Jira 工单链接与摘要</b>（点击框内一键复制）：\n\n<pre><code>{html.escape(text_content)}</code></pre>",
+                    f"\U0001f4cb <b>Jira 工單連結與摘要</b>（點擊框內一鍵複製）：\n\n<pre><code>{html.escape(text_content)}</code></pre>",
                     parse_mode="HTML",
                 )
             return
@@ -527,8 +525,8 @@ def build_forward_handlers(
 
                 editable_text = jira_template_editable_text(last_pub["template"])
                 await query.message.reply_text(
-                    f"✏️ <b>编辑已发布工单 ({html.escape(last_pub['key'])})</b>\n\n"
-                    "请点击/复制下方代码框内的完整文字，在输入框中修改后发送给机器人直接更新：\n\n"
+                    f"✏️ <b>編輯已發布工單 ({html.escape(last_pub['key'])})</b>\n\n"
+                    "請點擊或複製下方框內文字，在輸入框中修改後發送給機器人直接更新：\n\n"
                     f"<pre><code>{html.escape(editable_text)}</code></pre>",
                     parse_mode="HTML",
                 )
@@ -540,7 +538,7 @@ def build_forward_handlers(
             template = context.user_data.get("pending_template")
             if template is None:
                 if query.message is not None:
-                    await query.message.reply_text("未找到待编辑的工单草稿。")
+                    await query.message.reply_text("未找到待編輯的工單草稿。")
                 return
 
             context.user_data["editing_draft"] = True
@@ -549,7 +547,7 @@ def build_forward_handlers(
             editable_text = jira_template_editable_text(template)
             if query.message is not None:
                 await query.message.reply_text(
-                    "✏️ <b>请点击/复制下方代码框内的完整文字，修改后再直接发送给机器人：</b>\n\n"
+                    "✏️ <b>請點擊或複製下方框內文字，修改後再直接發送給機器人：</b>\n\n"
                     f"<pre><code>{html.escape(editable_text)}</code></pre>",
                     parse_mode="HTML",
                 )
@@ -571,7 +569,7 @@ def build_forward_handlers(
         if template is None:
             if query.message is not None:
                 await query.message.reply_text(
-                    "未找到待创建的工单草稿，请重新转发消息。"
+                    "未找到待建立的工單草稿，請重新轉發訊息。"
                 )
             return
 
@@ -579,13 +577,13 @@ def build_forward_handlers(
         if credentials is None:
             if query.message is not None:
                 await query.message.reply_text(
-                    "未检测到您的 Jira 账号绑定，请先使用 /auth 进行绑定。"
+                    "未檢測到您的 Jira 帳號綁定，請先使用 /auth 進行綁定。"
                 )
             return
 
         if query.message is not None:
             await query.message.reply_text(
-                "\U0001f504 正在提交创建 Jira 工单..."
+                "\U0001f504 正在提交建立 Jira 工單..."
             )
 
         from .jira_client import JiraClientError
@@ -598,7 +596,7 @@ def build_forward_handlers(
             LOGGER.error("Jira issue creation failed (%s)", type(error).__name__)
             if query.message is not None:
                 await query.message.reply_text(
-                    f"\u274c 工单创建失败: {html.escape(str(error))}"
+                    f"\u274c 工單建立失敗: {html.escape(str(error))}"
                 )
             return
 
@@ -614,15 +612,15 @@ def build_forward_handlers(
             [
                 [
                     InlineKeyboardButton(
-                        "\U0001f517 仅复制链接", callback_data="jira_copylink"
+                        "\U0001f517 僅複製連結", callback_data="jira_copylink"
                     ),
                     InlineKeyboardButton(
-                        "\U0001f4cb 复制链接与摘要", callback_data="jira_copysummary"
+                        "\U0001f4cb 複製連結與摘要", callback_data="jira_copysummary"
                     ),
                 ],
                 [
                     InlineKeyboardButton(
-                        "\u270f\ufe0f 编辑此工单", callback_data="jira_editpublished"
+                        "\u270f\ufe0f 編輯此工單", callback_data="jira_editpublished"
                     ),
                 ],
             ]
@@ -630,10 +628,10 @@ def build_forward_handlers(
 
         if query.message is not None:
             await query.message.reply_text(
-                f"\u2705 <b>Jira 工单创建成功！</b>\n\n"
+                f"\u2705 <b>Jira 工單建立成功！</b>\n\n"
                 f"<b>Key</b>: <code>{html.escape(result.key)}</code>\n"
-                f"<b>标题</b>: {html.escape(template.summary)}\n"
-                f"<b>链接</b>: {html.escape(result.url)}",
+                f"<b>標題</b>: {html.escape(template.summary)}\n"
+                f"<b>連結</b>: {html.escape(result.url)}",
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )

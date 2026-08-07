@@ -69,10 +69,10 @@ async def run() -> None:
         try:
             await app.bot.set_my_commands(
                 [
-                    BotCommand("start", "开始使用 / 查看帮助"),
-                    BotCommand("new", "📝 手动创建 Jira 工单"),
-                    BotCommand("auth", "🔑 绑定 Jira 账号"),
-                    BotCommand("logout", "🚪 解绑 Jira 账号"),
+                    BotCommand("start", "開始使用 / 查看說明"),
+                    BotCommand("new", "📝 手動建立 Jira 工單"),
+                    BotCommand("auth", "🔑 綁定 Jira 帳號"),
+                    BotCommand("logout", "🚪 解綁 Jira 帳號"),
                 ]
             )
         except Exception as err:

@@ -42,28 +42,28 @@ def build_auth_handlers(
             return
 
         keyboard = ReplyKeyboardMarkup(
-            [["📝 手动创建 Jira 工单"]],
+            [["📝 手動建立 Jira 工單"]],
             resize_keyboard=True,
         )
 
         credentials = await user_store.get(user.id)
         if credentials:
             await message.reply_text(
-                f"👋 欢迎使用 DZTGBot！当前绑定的 Jira 账号: "
+                f"👋 歡迎使用 DZTGBot！目前綁定的 Jira 帳號: "
                 f'"{credentials.jira_display_name}" '
-                f"({credentials.jira_username}).\n\n"
-                "您可以直接转发消息给机器人生成工单，或点击下方 [📝 手动创建 Jira 工单] / 使用 /new 手动创建。\n\n"
-                "常用命令：\n"
-                "/new — 📝 手动创建 Jira 工单\n"
-                "/auth — 🔑 重新绑定 Jira 账号\n"
-                "/logout — 🚪 解绑 Jira 账号",
+                f"({credentials.jira_username})。\n\n"
+                "您可以直接轉發訊息給機器人生成工單，或點擊下方 [📝 手動建立 Jira 工單] / 使用 /new 手動建立。\n\n"
+                "常用指令：\n"
+                "/new — 📝 手動建立 Jira 工單\n"
+                "/auth — 🔑 重新綁定 Jira 帳號\n"
+                "/logout — 🚪 解綁 Jira 帳號",
                 reply_markup=keyboard,
             )
         else:
             await message.reply_text(
-                "👋 欢迎使用 DZTGBot！\n\n"
-                "转发任何消息给机器人，或点击下方 [📝 手动创建 Jira 工单] 按钮即可快速创建 Jira 工单。\n\n"
-                f"使用前请先发送 /auth 绑定您的 Jira 账号。",
+                "👋 歡迎使用 DZTGBot！\n\n"
+                "轉發任何訊息給機器人，或點擊下方 [📝 手動建立 Jira 工單] 按鈕即可快速建立 Jira 工單。\n\n"
+                "使用前請先發送 /auth 綁定您的 Jira 帳號。",
                 reply_markup=keyboard,
             )
 

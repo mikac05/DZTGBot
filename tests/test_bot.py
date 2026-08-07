@@ -245,7 +245,7 @@ class PreviewTests(unittest.TestCase):
         )
         preview = jira_template_preview(template)
         self.assertLessEqual(len(preview), 4000)
-        self.assertIn("Jira 工单草稿预览", preview)
+        self.assertIn("Jira 工單草稿預覽", preview)
         self.assertIn("未指定", preview)
 
     def test_media_enum_serializes_to_expected_value(self) -> None:
@@ -265,17 +265,17 @@ class PreviewTests(unittest.TestCase):
             acceptance_criteria=["Criterion 1"],
         )
         editable = jira_template_editable_text(original)
-        self.assertIn("标题: Original Summary", editable)
+        self.assertIn("標題: Original Summary", editable)
 
         edited_input = (
-            "标题: Modified Summary\n"
-            "类型: 缺陷\n"
-            "项目: NGSSA3\n"
-            "优先级: High\n"
+            "標題: Modified Summary\n"
+            "類型: 缺陷\n"
+            "專案: NGSSA3\n"
+            "優先級: High\n"
             "描述:\n"
             "Modified Description line 1\n"
             "Modified Description line 2\n\n"
-            "验收标准:\n"
+            "驗收標準:\n"
             "- New Criterion 1\n"
             "- New Criterion 2"
         )
@@ -300,9 +300,9 @@ class PreviewTests(unittest.TestCase):
             acceptance_criteria=[],
         )
         errors = validate_template_fields(invalid_template)
-        self.assertTrue(any("标题" in e for e in errors))
-        self.assertTrue(any("详细描述" in e for e in errors))
-        self.assertTrue(any("工单类型" in e for e in errors))
+        self.assertTrue(any("標題" in e for e in errors))
+        self.assertTrue(any("詳細描述" in e for e in errors))
+        self.assertTrue(any("工單類型" in e for e in errors))
 
 
 class GeminiAnalyzerTests(unittest.IsolatedAsyncioTestCase):
