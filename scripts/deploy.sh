@@ -299,7 +299,7 @@ build_virtual_environment() {
     PYTHONPATH="$PROJECT_DIR/src" "$VENV_DIR/bin/python" -m unittest discover -s "$PROJECT_DIR/tests" -v
 
     chown -R "root:$SERVICE_GROUP" "$VENV_DIR"
-    chmod -R go-w "$VENV_DIR"
+    chmod -R u=rwX,g=rX,o= "$VENV_DIR"
     if ! runuser -u "$DZTGBOT_SERVICE_USER" -- test -r "$PROJECT_DIR/src/dztgbot/__main__.py"; then
         die "The service account cannot read the project. Move it outside a private home/root directory or correct directory traversal permissions."
     fi
