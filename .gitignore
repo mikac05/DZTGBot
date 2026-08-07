@@ -48,4 +48,6 @@ Thumbs.db
 *.log
 *.pid
 run/
-var/
+var/*
+!var/.gitkeep
+
