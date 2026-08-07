@@ -28,10 +28,9 @@ from telegram.ext import (
     filters,
 )
 
-from .vpn import VpnState
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from .analysis import JiraTaskTemplate
 
     from .analysis import GeminiAnalyzer
     from .jira_client import JiraClient
@@ -324,6 +323,8 @@ def build_forward_handlers(
         if incoming is None or context.user_data is None:
             return
 
+        from .analysis import JiraTaskTemplate, jira_template_editable_text
+
         default_template = JiraTaskTemplate(
             summary="",
             description="",
@@ -337,8 +338,6 @@ def build_forward_handlers(
         )
         context.user_data["pending_template"] = default_template
         context.user_data["editing_draft"] = True
-
-        from .analysis import jira_template_editable_text
 
         blank_editable = jira_template_editable_text(default_template)
         await incoming.reply_text(
@@ -364,6 +363,8 @@ def build_forward_handlers(
 
         if forwarded_message_in(incoming) is not None:
             return
+
+        from .analysis import JiraTaskTemplate, jira_template_preview, parse_edited_template, validate_template_fields
 
         original_template = context.user_data.get("pending_template")
         if original_template is None:
