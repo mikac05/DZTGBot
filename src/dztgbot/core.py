@@ -193,11 +193,11 @@ def build_forward_handlers(
     """Build the forward analysis handler and issue-confirmation callback with multi-message batching."""
 
     async def analyze_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Extract forwarded messages, buffer them into a batch, and analyze after debounce."""
+        """Extract forwarded messages, buffer them safely with a sliding window, and analyze."""
 
         incoming = update.effective_message
         user = update.effective_user
-        if incoming is None or user is None:
+        if incoming is None or user is None or context.user_data is None:
             return
 
         forwarded = forwarded_message_in(incoming)
@@ -212,103 +212,104 @@ def build_forward_handlers(
             record.original_chat is not None,
         )
 
-        if context.user_data is None:
-            return
+        lock: asyncio.Lock = context.user_data.setdefault("batch_lock", asyncio.Lock())
+        async with lock:
+            batch: list[ForwardedMessage] = context.user_data.setdefault("pending_batch", [])
+            batch.append(record)
+            batch_count = len(batch)
+            context.user_data["last_forward_time"] = asyncio.get_running_loop().time()
 
-        # Initialize or append to pending batch
-        batch: list[ForwardedMessage] = context.user_data.setdefault("pending_batch", [])
-        batch.append(record)
-        batch_count = len(batch)
-
-        # Cancel existing timer task if one is running
-        existing_task: asyncio.Task | None = context.user_data.get("batch_timer_task")
-        if existing_task is not None and not existing_task.done():
-            existing_task.cancel()
-
-        status_msg = context.user_data.get("batch_status_msg")
-        if status_msg is None:
-            status_msg = await incoming.reply_text(
-                f"\U0001f4e5 已接收 {batch_count} 条转发消息，等待中...\n"
-                "(3.5 秒内继续转发将自动合并为同一工单)"
-            )
-            context.user_data["batch_status_msg"] = status_msg
-        else:
-            try:
-                await status_msg.edit_text(
-                    f"\U0001f4e5 已接收 {batch_count} 条转发消息，等待中...\n"
-                    "(3.5 秒内继续转发将自动合并为同一工单)"
+            status_msg = context.user_data.get("batch_status_msg")
+            if status_msg is None:
+                status_msg = await incoming.reply_text(
+                    f"\U0001f4e5 已接收 {batch_count} 条转发消息，等待合并...\n"
+                    "(2.5 秒内继续转发将合并为同一工单)"
                 )
-            except Exception:
-                pass
-
-        async def process_batch() -> None:
-            try:
-                await asyncio.sleep(3.5)
-            except asyncio.CancelledError:
-                return
-
-            current_batch: list[ForwardedMessage] = context.user_data.pop("pending_batch", [])
-            context.user_data.pop("batch_timer_task", None)
-            current_status = context.user_data.pop("batch_status_msg", None)
-
-            if not current_batch:
-                return
-
-            if current_status is not None:
+                context.user_data["batch_status_msg"] = status_msg
+            else:
                 try:
-                    await current_status.edit_text(
-                        f"\U0001f916 正在分析 {len(current_batch)} 条转发消息，生成统一的 Jira 工单..."
+                    await status_msg.edit_text(
+                        f"\U0001f4e5 已接收 {batch_count} 条转发消息，等待合并...\n"
+                        "(2.5 秒内继续转发将合并为同一工单)"
                     )
                 except Exception:
                     pass
 
-            try:
-                template = await analyzer.analyze(current_batch)
-            except Exception as error:
-                LOGGER.error("Gemini analysis failed (%s: %s)", type(error).__name__, error)
-                await incoming.reply_text(
-                    "\u274c Gemini 分析失败或未返回有效结果，请稍后再试。"
-                )
-                return
+            worker_active = context.user_data.get("batch_worker_active", False)
+            if not worker_active:
+                context.user_data["batch_worker_active"] = True
 
-            from .analysis import jira_template_preview
+                async def batch_worker() -> None:
+                    loop = asyncio.get_running_loop()
+                    while True:
+                        await asyncio.sleep(0.5)
+                        async with lock:
+                            now = loop.time()
+                            last_time = context.user_data.get("last_forward_time", 0.0)
+                            if now - last_time >= 2.5:
+                                current_batch = list(context.user_data.pop("pending_batch", []))
+                                context.user_data["batch_worker_active"] = False
+                                current_status = context.user_data.pop("batch_status_msg", None)
+                                break
 
-            preview = jira_template_preview(template)
-            context.user_data["pending_template"] = template
+                    if not current_batch:
+                        return
 
-            credentials = await user_store.get(user.id)
-            if credentials is None:
-                await incoming.reply_text(
-                    f"{preview}\n\n"
-                    "\u26a0\ufe0f 您尚未绑定 Jira 账号，请先在私聊中使用 /auth 进行绑定，然后再进行转发。"
-                )
-                return
+                    if current_status is not None:
+                        try:
+                            await current_status.edit_text(
+                                f"\U0001f916 正在分析 {len(current_batch)} 条转发消息，生成统一的 Jira 工单..."
+                            )
+                        except Exception:
+                            pass
 
-            vpn_warning = ""
-            vpn_status = await vpn_manager.status()
-            if vpn_status.state in (VpnState.DOWN, VpnState.ERROR):
-                vpn_warning = (
-                    "\n\n\u26a0\ufe0f VPN 当前处于断开状态，创建工单可能会失败。"
-                )
+                    try:
+                        template = await analyzer.analyze(current_batch)
+                    except Exception as error:
+                        LOGGER.error("Gemini analysis failed (%s: %s)", type(error).__name__, error)
+                        await incoming.reply_text(
+                            "\u274c Gemini 分析失败或未返回有效结果，请稍后再试。"
+                        )
+                        return
 
-            keyboard = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(
-                            "\u2705 创建 Jira 工单", callback_data="jira_confirm"
-                        ),
-                        InlineKeyboardButton(
-                            "\u274c 取消", callback_data="jira_cancel"
-                        ),
-                    ]
-                ]
-            )
-            await incoming.reply_text(
-                f"{preview}{vpn_warning}",
-                reply_markup=keyboard,
-            )
+                    from .analysis import jira_template_preview
 
-        context.user_data["batch_timer_task"] = asyncio.create_task(process_batch())
+                    preview = jira_template_preview(template)
+                    context.user_data["pending_template"] = template
+
+                    credentials = await user_store.get(user.id)
+                    if credentials is None:
+                        await incoming.reply_text(
+                            f"{preview}\n\n"
+                            "\u26a0\ufe0f 您尚未绑定 Jira 账号，请先在私聊中使用 /auth 进行绑定，然后再进行转发。"
+                        )
+                        return
+
+                    vpn_warning = ""
+                    vpn_status = await vpn_manager.status()
+                    if vpn_status.state in (VpnState.DOWN, VpnState.ERROR):
+                        vpn_warning = (
+                            "\n\n\u26a0\ufe0f VPN 当前处于断开状态，创建工单可能会失败。"
+                        )
+
+                    keyboard = InlineKeyboardMarkup(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    "\u2705 创建 Jira 工单", callback_data="jira_confirm"
+                                ),
+                                InlineKeyboardButton(
+                                    "\u274c 取消", callback_data="jira_cancel"
+                                ),
+                            ]
+                        ]
+                    )
+                    await incoming.reply_text(
+                        f"{preview}{vpn_warning}",
+                        reply_markup=keyboard,
+                    )
+
+                asyncio.create_task(batch_worker())
 
     async def handle_issue_callback(
         update: Update, context: ContextTypes.DEFAULT_TYPE
