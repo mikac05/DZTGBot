@@ -160,7 +160,7 @@ prepare_environment_file() {
 
 validate_environment() {
     local key
-    for key in TELEGRAM_BOT_TOKEN GEMINI_API_KEY GEMINI_MODEL TELEGRAM_ADMIN_USER_IDS JIRA_RULES_PATH; do
+    for key in TELEGRAM_BOT_TOKEN GEMINI_API_KEY GEMINI_MODEL TELEGRAM_ADMIN_USER_IDS JIRA_RULES_PATH JIRA_URL; do
         require_configured_value "$key"
     done
 

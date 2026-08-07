@@ -13,6 +13,7 @@ from dztgbot.analysis import GeminiAnalyzer, JiraTaskTemplate, jira_template_pre
 from dztgbot.config import Settings
 from dztgbot.core import ForwardedMessage, MediaType, TelegramIdentity, forwarded_message_in
 from dztgbot.rules import RulesStore
+from dztgbot.user_store import JiraCredentials, UserStore
 from dztgbot.vpn import NetworkManagerL2tpManager, VpnState
 
 
@@ -32,6 +33,7 @@ class SettingsTests(unittest.TestCase):
             "GEMINI_MODEL": "TEST_ONLY_MODEL_IDENTIFIER",
             "TELEGRAM_ADMIN_USER_IDS": "1001,1002",
             "JIRA_RULES_PATH": "var/test-rules.txt",
+            "JIRA_URL": "https://jira.test.example.com",
             "VPN_ENABLED": "false",
         }
         with patch.dict(os.environ, environment, clear=True):
@@ -39,6 +41,11 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(settings.vpn_enabled)
         self.assertEqual(settings.telegram_admin_user_ids, frozenset({1001, 1002}))
         self.assertEqual(settings.telegram_concurrent_updates, 4)
+        self.assertEqual(settings.jira_url, "https://jira.test.example.com")
+        self.assertEqual(
+            settings.user_credentials_path,
+            Path("var") / "user_credentials.json",
+        )
 
     def test_remote_vpn_start_requires_vpn_to_be_enabled(self) -> None:
         environment = {
@@ -47,6 +54,7 @@ class SettingsTests(unittest.TestCase):
             "GEMINI_MODEL": "TEST_ONLY_MODEL_IDENTIFIER",
             "TELEGRAM_ADMIN_USER_IDS": "1001",
             "JIRA_RULES_PATH": "var/test-rules.txt",
+            "JIRA_URL": "https://jira.test.example.com",
             "VPN_ENABLED": "false",
             "VPN_ALLOW_START": "true",
         }
@@ -101,6 +109,41 @@ class RulesStoreTests(unittest.IsolatedAsyncioTestCase):
 
             path.write_text("external rules\n", encoding="utf-8")
             self.assertEqual(await store.current_rules(), "external rules")
+
+
+class UserStoreTests(unittest.IsolatedAsyncioTestCase):
+    async def test_store_retrieve_persist_and_remove(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "creds.json"
+            store = UserStore(path)
+            await store.initialize()
+
+            # No credentials initially.
+            self.assertIsNone(await store.get(12345))
+
+            # Store and retrieve.
+            creds = JiraCredentials(
+                jira_username="testuser",
+                jira_display_name="Test User",
+                jira_pat="TEST_ONLY_PAT",
+            )
+            await store.store(12345, creds)
+            retrieved = await store.get(12345)
+            self.assertIsNotNone(retrieved)
+            self.assertEqual(retrieved.jira_username, "testuser")
+            self.assertEqual(retrieved.jira_display_name, "Test User")
+
+            # Persistence: create a new store instance and verify.
+            store2 = UserStore(path)
+            await store2.initialize()
+            retrieved2 = await store2.get(12345)
+            self.assertIsNotNone(retrieved2)
+            self.assertEqual(retrieved2.jira_username, "testuser")
+
+            # Remove.
+            self.assertTrue(await store.remove(12345))
+            self.assertIsNone(await store.get(12345))
+            self.assertFalse(await store.remove(12345))
 
 
 class VpnTests(unittest.IsolatedAsyncioTestCase):
@@ -236,6 +279,7 @@ class GeminiAnalyzerTests(unittest.IsolatedAsyncioTestCase):
         analyzer._model = "TEST_ONLY_MODEL"
         analyzer._timeout_seconds = 1
         analyzer._rules_store = FakeRulesStore()
+        analyzer._default_project_key = None
         analyzer._client = SimpleNamespace(aio=SimpleNamespace(models=FakeModels()))
         forwarded = ForwardedMessage(
             original_sender=TelegramIdentity(id=None, display_name="Test sender"),

@@ -2,45 +2,40 @@
 
 ## Current status
 
-The bot implementation, offline tests, Ubuntu 22.04-only deployment script, systemd unit, VPN compatibility template, test plan, and cross-agent handoff workflow are present. No real credential or private VPN value has been added. No Jira connection exists.
+The full end-to-end bot pipeline is implemented and tested:
+1. **Gemini AI Analysis**: Production system instruction and prompt in `src/dztgbot/analysis.py` with strict Pydantic `JiraTaskTemplate` schema validation.
+2. **Jira REST API v2 Integration**: `src/dztgbot/jira_client.py` handles PAT validation (`/myself`) and issue creation (`/issue`).
+3. **Per-User PAT Storage**: `src/dztgbot/user_store.py` securely persists per-user PATs to disk (mode 0600, atomic writes).
+4. **Interactive Telegram Flow**: `/start` greets, `/auth` collects PAT in private chat (auto-deleting the message), `/logout` removes credentials, and forwarded messages receive a preview with `[✅ Create Issue]` and `[❌ Cancel]` inline buttons.
+5. **VPN Support**: NetworkManager L2TP/IPsec status/start controls integrated via `src/dztgbot/vpn.py` and `scripts/deploy.sh`.
+6. **Hardened Deployment**: Rerunnable `scripts/deploy.sh` for Ubuntu 22.04 target servers and `deploy/systemd/dztgbot.service` systemd unit.
 
-Ubuntu 22.04 is settled as the only target. All alternate platform branches, package logic, flags, and documentation were removed and must not be restored without a new explicit requirement.
-
-The first safe handoff commit exists locally. Its push is blocked because the currently authenticated Git identity lacks write permission to the configured `origin`. No remote URL or history was changed.
+24 offline tests and secret-safety validation pass cleanly.
 
 ## Exact next action
 
-Resolve Git write access without force-pushing or changing the remote destination implicitly. Then run `DZTGBot handoff` again. After the handoff commit is pushed, verify portability from a clean clone or another AI application by issuing:
-
-```text
-DZTGBot continue
-```
-
-The receiving agent must fast-forward safely, read the durable context, report this checkpoint, and then assist with the first target-server deployment pass from the cloned checkout.
-
-For deployment, the next concrete operation is to run `scripts/deploy.sh` on the target server with a chosen non-root service-account name and protected environment-file path. The first run creates the protected placeholder environment file and exits; credentials are entered later with `sudoedit`, never in chat or command history.
+1. Resolve Git write access to `origin` (or update remote URL) and push the branch.
+2. Transfer or clone the repository to the target Ubuntu 22.04 server.
+3. Run `sudo DZTGBOT_SERVICE_USER=dztgbot DZTGBOT_ENV_FILE=/etc/dztgbot/env bash scripts/deploy.sh` to generate `/etc/dztgbot/env`.
+4. Configure `/etc/dztgbot/env` via `sudoedit /etc/dztgbot/env` with real credentials (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `JIRA_URL`, `TELEGRAM_ADMIN_USER_IDS`).
+5. Re-run `deploy.sh` to complete installation and start `dztgbot.service`.
 
 ## Inputs still required from the user or target environment
 
-- Confirm the target reports Ubuntu 22.04; every other distribution or release is out of scope.
-- Choose the target checkout location, non-root service account, and protected environment-file location.
-- Privately enter the real Telegram token, Gemini key, supported Gemini model, and numeric Telegram admin IDs.
-- Supply approved Gemini prompts and Jira task rules; tracked versions intentionally remain placeholders.
-- If VPN is required immediately, install the private L2TP/IPsec NetworkManager profile derived from the supplied XML and conduct a console-supervised full-tunnel test.
+- Confirm target server OS is Ubuntu 22.04 LTS.
+- Real `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `GEMINI_MODEL`, and `JIRA_URL` values (to be configured in `/etc/dztgbot/env`).
+- User Personal Access Tokens (PATs) submitted via `/auth` in private Telegram chat with the bot.
+- If L2TP/IPsec VPN is required, the private `.nmconnection` profile installed at mode 0600 on the server.
 
 ## Do not redo
 
-- Do not redesign the src layout or replace the async Telegram/Google SDK choices without a new requirement.
-- Do not switch to WireGuard.
-- Do not add Jira write logic.
-- Do not request credentials in chat.
-- Do not re-infer VPN secrets from `src/ref/vpnsettings.xml` or expose its contents.
-- Do not repeat completed Phase 0–7 scaffolding unless verification finds a concrete defect.
+- Do not rewrite `user_store.py`, `jira_client.py`, or `jira_auth.py` — they are fully implemented and verified.
+- Do not remove inline `[✅ Create Issue]` / `[❌ Cancel]` buttons — explicit human confirmation before posting is a core requirement.
+- Do not hardcode Jira credentials or tokens in tracked files.
+- Do not remove Ubuntu 22.04 platform checks.
 
 ## Required verification on resume
 
-1. Confirm the handoff commit is the checked-out `HEAD` and the worktree state is understood.
-2. Run the offline tests before deployment changes.
-3. Confirm ignored secret paths remain ignored.
-4. On the target host, confirm the installer detects Ubuntu 22.04 and refuses any other platform.
-5. Follow `docs/end-to-end-test-plan.md` after systemd reports the service active.
+1. Confirm 24 offline tests pass (`$env:PYTHONPATH="src;."; .venv\Scripts\pytest`).
+2. Run `python scripts/handoff.py validate` to verify secret safety and context boundaries.
+3. Follow the deployment guide to test live on Ubuntu 22.04.

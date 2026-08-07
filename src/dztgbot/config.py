@@ -28,6 +28,10 @@ class Settings:
     vpn_sudo_bin: Path
     vpn_command_timeout_seconds: float
     log_level: str
+    jira_url: str
+    jira_verify_ssl: bool
+    jira_default_project_key: str | None
+    user_credentials_path: Path
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -87,6 +91,31 @@ class Settings:
         if not raw_rules_path or raw_rules_path.startswith("TODO_"):
             raise RuntimeError("JIRA_RULES_PATH must point to the runtime rules file.")
         jira_rules_path = Path(raw_rules_path).expanduser()
+
+        jira_url = os.getenv("JIRA_URL", "").strip()
+        if not jira_url or jira_url.startswith("TODO_"):
+            raise RuntimeError(
+                "JIRA_URL must be configured with the Jira server base URL "
+                "(e.g. https://jira.example.com)."
+            )
+        if not jira_url.startswith(("http://", "https://")):
+            raise RuntimeError("JIRA_URL must start with http:// or https://.")
+        jira_url = jira_url.rstrip("/")
+
+        jira_verify_ssl = cls._environment_bool("JIRA_VERIFY_SSL", default=True)
+
+        raw_default_project = os.getenv("JIRA_DEFAULT_PROJECT_KEY", "").strip()
+        jira_default_project_key = (
+            raw_default_project
+            if raw_default_project and not raw_default_project.startswith("TODO_")
+            else None
+        )
+
+        raw_creds_path = os.getenv("USER_CREDENTIALS_PATH", "").strip()
+        if raw_creds_path and not raw_creds_path.startswith("TODO_"):
+            user_credentials_path = Path(raw_creds_path).expanduser()
+        else:
+            user_credentials_path = jira_rules_path.parent / "user_credentials.json"
 
         vpn_enabled = cls._environment_bool("VPN_ENABLED", default=False)
         vpn_allow_start = cls._environment_bool("VPN_ALLOW_START", default=False)
@@ -148,6 +177,10 @@ class Settings:
             vpn_sudo_bin=vpn_sudo_bin,
             vpn_command_timeout_seconds=vpn_command_timeout_seconds,
             log_level=log_level,
+            jira_url=jira_url,
+            jira_verify_ssl=jira_verify_ssl,
+            jira_default_project_key=jira_default_project_key,
+            user_credentials_path=user_credentials_path,
         )
 
     @staticmethod

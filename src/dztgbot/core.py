@@ -8,6 +8,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     Message,
     MessageOriginChannel,
     MessageOriginChat,
@@ -15,10 +17,22 @@ from telegram import (
     MessageOriginUser,
     Update,
 )
-from telegram.ext import ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    BaseHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from .vpn import VpnState
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from .analysis import GeminiAnalyzer
+    from .jira_client import JiraClient
+    from .user_store import UserStore
     from .vpn import NetworkManagerL2tpManager
 
 LOGGER = logging.getLogger(__name__)
@@ -170,17 +184,20 @@ def extract_forwarded_message(message: Message) -> ForwardedMessage:
     )
 
 
-def build_forward_handler(
+def build_forward_handlers(
     analyzer: "GeminiAnalyzer",
     vpn_manager: "NetworkManagerL2tpManager",
-) -> MessageHandler:
-    """Build the forward handler with its Gemini dependency injected."""
+    user_store: "UserStore",
+    jira_client: "JiraClient",
+) -> "Sequence[BaseHandler]":
+    """Build the forward analysis handler and issue-confirmation callback."""
 
     async def analyze_forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Extract, acknowledge, analyze, and preview an accepted forward."""
+        """Extract, analyze, preview, and offer one-tap issue creation."""
 
         incoming = update.effective_message
-        if incoming is None:
+        user = update.effective_user
+        if incoming is None or user is None:
             return
 
         forwarded = forwarded_message_in(incoming)
@@ -188,36 +205,146 @@ def build_forward_handler(
             return
 
         record = extract_forwarded_message(forwarded)
-        # TODO: Add an explicit human approval step before any future Jira integration.
-        # Do not log record.text, generated descriptions, or credentials.
         LOGGER.info(
             "Accepted forwarded message (media_type=%s, sender_available=%s, chat_available=%s)",
             record.media_type,
             record.original_sender is not None,
             record.original_chat is not None,
         )
-        await incoming.reply_text("Forward received. Analyzing...")
-
-        vpn_status = await vpn_manager.status()
-        if not vpn_status.is_up:
-            await incoming.reply_text(
-                "The VPN tunnel is unavailable, so Jira is temporarily unreachable. "
-                "I will still prepare the task preview."
-            )
+        await incoming.reply_text("\U0001f4e8 Forward received. Analyzing...")
 
         try:
             template = await analyzer.analyze(record)
         except Exception as error:
-            # Do not attach third-party tracebacks: provider request URLs may contain
-            # sensitive authentication material depending on SDK behavior.
             LOGGER.error("Gemini analysis failed (%s)", type(error).__name__)
             await incoming.reply_text(
-                "Gemini analysis failed or returned an invalid result. Please try again later."
+                "\u274c Gemini analysis failed or returned an invalid result. "
+                "Please try again later."
             )
             return
 
         from .analysis import jira_template_preview
 
-        await incoming.reply_text(jira_template_preview(template))
+        preview = jira_template_preview(template)
 
-    return MessageHandler(ForwardOrReplyToForwardFilter(), analyze_forward)
+        # Store the template so the callback can retrieve it.
+        if context.user_data is not None:
+            context.user_data["pending_template"] = template
+
+        # Check whether the user has stored Jira credentials.
+        credentials = await user_store.get(user.id)
+        if credentials is None:
+            await incoming.reply_text(
+                f"{preview}\n\n"
+                "\u26a0\ufe0f You haven't connected your Jira account yet. "
+                "Use /auth to connect, then forward the message again."
+            )
+            return
+
+        # Warn about VPN problems (skip if VPN is intentionally disabled).
+        vpn_warning = ""
+        vpn_status = await vpn_manager.status()
+        if vpn_status.state in (VpnState.DOWN, VpnState.ERROR):
+            vpn_warning = (
+                "\n\n\u26a0\ufe0f VPN is currently down. Issue creation may fail "
+                "until connectivity is restored."
+            )
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "\u2705 Create Issue", callback_data="jira_confirm"
+                    ),
+                    InlineKeyboardButton(
+                        "\u274c Cancel", callback_data="jira_cancel"
+                    ),
+                ]
+            ]
+        )
+        await incoming.reply_text(
+            f"{preview}{vpn_warning}",
+            reply_markup=keyboard,
+        )
+
+    async def handle_issue_callback(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle the Create Issue / Cancel inline-button press."""
+
+        query = update.callback_query
+        user = update.effective_user
+        if query is None or user is None:
+            return
+
+        await query.answer()
+
+        if query.data == "jira_cancel":
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            if query.message is not None:
+                await query.message.reply_text("Issue creation cancelled.")
+            return
+
+        if query.data != "jira_confirm":
+            return
+
+        # Remove buttons immediately to prevent double-clicks.
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        template = (
+            context.user_data.pop("pending_template", None)
+            if context.user_data is not None
+            else None
+        )
+        if template is None:
+            if query.message is not None:
+                await query.message.reply_text(
+                    "No pending issue found. Please forward a message again."
+                )
+            return
+
+        credentials = await user_store.get(user.id)
+        if credentials is None:
+            if query.message is not None:
+                await query.message.reply_text(
+                    "Your Jira session is not configured. "
+                    "Use /auth to connect first."
+                )
+            return
+
+        if query.message is not None:
+            await query.message.reply_text(
+                "\U0001f504 Creating Jira issue..."
+            )
+
+        from .jira_client import JiraClientError
+
+        try:
+            result = await jira_client.create_issue(
+                credentials.jira_pat, template
+            )
+        except JiraClientError as error:
+            LOGGER.error("Jira issue creation failed (%s)", type(error).__name__)
+            if query.message is not None:
+                await query.message.reply_text(
+                    f"\u274c Failed to create issue: {error}"
+                )
+            return
+
+        if query.message is not None:
+            await query.message.reply_text(
+                f"\u2705 Issue created: {result.key}\n{result.url}"
+            )
+
+    return (
+        MessageHandler(ForwardOrReplyToForwardFilter(), analyze_forward),
+        CallbackQueryHandler(
+            handle_issue_callback, pattern=r"^jira_(confirm|cancel)$"
+        ),
+    )

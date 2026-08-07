@@ -11,8 +11,11 @@ from telegram.ext import Application, ContextTypes
 from .admin import build_admin_handlers
 from .analysis import GeminiAnalyzer
 from .config import Settings
-from .core import build_forward_handler
+from .core import build_forward_handlers
+from .jira_auth import build_auth_handlers
+from .jira_client import JiraClient
 from .rules import RulesStore
+from .user_store import UserStore
 from .vpn import NetworkManagerL2tpManager
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +40,8 @@ async def run() -> None:
 
     rules_store = RulesStore(settings.jira_rules_path)
     await rules_store.initialize()
+    user_store = UserStore(settings.user_credentials_path)
+    await user_store.initialize()
     vpn_manager = NetworkManagerL2tpManager(
         enabled=settings.vpn_enabled,
         connection_name=settings.vpn_connection_name,
@@ -48,11 +53,16 @@ async def run() -> None:
     )
     initial_vpn_status = await vpn_manager.status()
     LOGGER.info("Initial VPN state: %s", initial_vpn_status.state)
+    jira_client = JiraClient(
+        base_url=settings.jira_url,
+        verify_ssl=settings.jira_verify_ssl,
+    )
     analyzer = GeminiAnalyzer(
         api_key=settings.gemini_api_key,
         model=settings.gemini_model,
         timeout_seconds=settings.gemini_timeout_seconds,
         rules_store=rules_store,
+        default_project_key=settings.jira_default_project_key,
     )
     application = (
         Application.builder()
@@ -61,14 +71,23 @@ async def run() -> None:
         .build()
     )
     application.add_error_handler(handle_application_error)
+
+    auth_conversation, start_handler, logout_handler = build_auth_handlers(
+        user_store, jira_client, settings.jira_url
+    )
     application.add_handlers(
         [
+            auth_conversation,
+            start_handler,
+            logout_handler,
             *build_admin_handlers(
                 rules_store,
                 settings.telegram_admin_user_ids,
                 vpn_manager,
             ),
-            build_forward_handler(analyzer, vpn_manager),
+            *build_forward_handlers(
+                analyzer, vpn_manager, user_store, jira_client
+            ),
         ]
     )
 
@@ -87,7 +106,7 @@ async def run() -> None:
         async with application:
             try:
                 await updater.start_polling(
-                    allowed_updates=("message",),
+                    allowed_updates=("message", "callback_query"),
                     bootstrap_retries=3,
                 )
                 polling_started = True
