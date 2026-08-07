@@ -216,10 +216,10 @@ def build_forward_handlers(
         try:
             template = await analyzer.analyze(record)
         except Exception as error:
-            LOGGER.error("Gemini analysis failed (%s)", type(error).__name__)
+            LOGGER.error("Gemini analysis failed (%s: %s)", type(error).__name__, error)
             await incoming.reply_text(
                 "\u274c Gemini analysis failed or returned an invalid result. "
-                "Please try again later."
+                "Please check GEMINI_MODEL / GEMINI_API_KEY."
             )
             return
 
