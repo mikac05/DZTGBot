@@ -302,11 +302,11 @@ build_virtual_environment() {
     chmod -R u=rwX,g=rX,o= "$VENV_DIR"
     chmod a+rx "$PROJECT_DIR"
     chmod -R a+rX "$PROJECT_DIR/src"
-    if ! runuser -u "$DZTGBOT_SERVICE_USER" -- test -r "$PROJECT_DIR/src/dztgbot/__main__.py"; then
+    if ! runuser -u "$DZTGBOT_SERVICE_USER" -s /bin/sh -- test -r "$PROJECT_DIR/src/dztgbot/__main__.py"; then
         die "The service account cannot read the project. Move it outside a private home/root directory or correct directory traversal permissions."
     fi
-    runuser -u "$DZTGBOT_SERVICE_USER" -- test -x "$VENV_DIR/bin/python" || die "The service account cannot execute the virtual-environment Python."
-    if runuser -u "$DZTGBOT_SERVICE_USER" -- test -w "$PROJECT_DIR/src/dztgbot/__main__.py"; then
+    runuser -u "$DZTGBOT_SERVICE_USER" -s /bin/sh -- test -x "$VENV_DIR/bin/python" || die "The service account cannot execute the virtual-environment Python."
+    if runuser -u "$DZTGBOT_SERVICE_USER" -s /bin/sh -- test -w "$PROJECT_DIR/src/dztgbot/__main__.py"; then
         die "The service account must not be able to modify application source files."
     fi
 }
