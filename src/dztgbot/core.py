@@ -28,6 +28,8 @@ from telegram.ext import (
     filters,
 )
 
+from .vpn import VpnState
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from .analysis import JiraTaskTemplate
