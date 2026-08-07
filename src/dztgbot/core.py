@@ -315,13 +315,49 @@ def build_forward_handlers(
 
                 asyncio.create_task(batch_worker())
 
-    async def handle_edited_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Process user's edited text block when editing_draft is active."""
-        if context.user_data is None or not context.user_data.get("editing_draft"):
-            return
+    async def new_issue_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /new command or '📝 手动创建 Jira 工单' button press."""
 
         incoming = update.effective_message
-        if incoming is None or not incoming.text:
+        if incoming is None or context.user_data is None:
+            return
+
+        default_template = JiraTaskTemplate(
+            summary="",
+            description="",
+            issuetype="Task",
+            labels=["telegram-intake"],
+            priority="Medium",
+            project_key="NGSSA3",
+            components=[],
+            assignee=None,
+            acceptance_criteria=[],
+        )
+        context.user_data["pending_template"] = default_template
+        context.user_data["editing_draft"] = True
+
+        from .analysis import jira_template_editable_text
+
+        blank_editable = jira_template_editable_text(default_template)
+        await incoming.reply_text(
+            "📝 **手动创建 Jira 工单**\n\n"
+            "请点击/复制下方代码框内的完整文字，在输入框中填入各个字段内容后发送给机器人：\n\n"
+            f"```\n{blank_editable}\n```",
+            parse_mode="Markdown",
+        )
+
+    async def handle_edited_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Process user's edited text block when editing_draft is active."""
+
+        incoming = update.effective_message
+        if incoming is None or not incoming.text or context.user_data is None:
+            return
+
+        if incoming.text.strip() in ("/new", "📝 手动创建 Jira 工单"):
+            await new_issue_command(update, context)
+            return
+
+        if not context.user_data.get("editing_draft"):
             return
 
         if forwarded_message_in(incoming) is not None:
@@ -329,12 +365,80 @@ def build_forward_handlers(
 
         original_template = context.user_data.get("pending_template")
         if original_template is None:
-            context.user_data["editing_draft"] = False
-            return
+            original_template = JiraTaskTemplate(
+                summary="",
+                description="",
+                issuetype="Task",
+                labels=["telegram-intake"],
+                priority="Medium",
+                project_key="NGSSA3",
+                components=[],
+                assignee=None,
+                acceptance_criteria=[],
+            )
 
-        from .analysis import jira_template_preview, parse_edited_template
+        from .analysis import jira_template_preview, parse_edited_template, validate_template_fields
 
         updated_template = parse_edited_template(incoming.text, original_template)
+
+        # Validate template fields
+        validation_errors = validate_template_fields(updated_template)
+        if validation_errors:
+            error_msg = "\n".join(f"❌ {err}" for err in validation_errors)
+            await incoming.reply_text(
+                f"⚠️ **工单内容不符合规范，请修正后重新发送：**\n\n{error_msg}",
+                parse_mode="Markdown",
+            )
+            context.user_data["pending_template"] = updated_template
+            return
+
+        user = update.effective_user
+        published_key = context.user_data.pop("editing_published_key", None)
+
+        if published_key and user:
+            credentials = await user_store.get(user.id)
+            if credentials:
+                await incoming.reply_text(f"\U0001f504 正在更新 Jira 工单 {published_key}...")
+                from .jira_client import JiraClientError
+                try:
+                    res = await jira_client.update_issue(
+                        credentials.jira_pat, published_key, updated_template
+                    )
+                    context.user_data["editing_draft"] = False
+                    context.user_data["last_published"] = {
+                        "key": res.key,
+                        "url": res.url,
+                        "summary": updated_template.summary,
+                        "template": updated_template,
+                    }
+                    keyboard = InlineKeyboardMarkup(
+                        [
+                            [
+                                InlineKeyboardButton(
+                                    "\U0001f517 仅复制链接", callback_data="jira_copylink"
+                                ),
+                                InlineKeyboardButton(
+                                    "\U0001f4cb 复制链接与摘要", callback_data="jira_copysummary"
+                                ),
+                            ],
+                            [
+                                InlineKeyboardButton(
+                                    "\u270f\ufe0f 编辑此工单", callback_data="jira_editpublished"
+                                ),
+                            ],
+                        ]
+                    )
+                    await incoming.reply_text(
+                        f"\u2705 **Jira 工单 {res.key} 更新成功！**\n{res.url}",
+                        reply_markup=keyboard,
+                        parse_mode="Markdown",
+                    )
+                    return
+                except JiraClientError as error:
+                    LOGGER.error("Jira issue update failed (%s)", type(error).__name__)
+                    await incoming.reply_text(f"\u274c 工单更新失败: {error}")
+                    return
+
         context.user_data["pending_template"] = updated_template
         context.user_data["editing_draft"] = False
 
@@ -364,7 +468,7 @@ def build_forward_handlers(
     async def handle_issue_callback(
         update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Handle the Create Issue / Edit / Cancel inline-button press."""
+        """Handle inline button actions."""
 
         query = update.callback_query
         user = update.effective_user
@@ -376,12 +480,54 @@ def build_forward_handlers(
         if query.data == "jira_cancel":
             if context.user_data is not None:
                 context.user_data["editing_draft"] = False
+                context.user_data.pop("editing_published_key", None)
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
             if query.message is not None:
-                await query.message.reply_text("已取消工单创建。")
+                await query.message.reply_text("已取消操作。")
+            return
+
+        if query.data == "jira_copylink":
+            last_pub = context.user_data.get("last_published") if context.user_data else None
+            if last_pub and query.message is not None:
+                url = last_pub["url"]
+                await query.message.reply_text(
+                    f"\U0001f517 **Jira 工单链接**（点击框内一键复制）：\n\n`{url}`",
+                    parse_mode="Markdown",
+                )
+            return
+
+        if query.data == "jira_copysummary":
+            last_pub = context.user_data.get("last_published") if context.user_data else None
+            if last_pub and query.message is not None:
+                key = last_pub["key"]
+                summary = last_pub["summary"]
+                url = last_pub["url"]
+                await query.message.reply_text(
+                    f"\U0001f4cb **Jira 工单链接与摘要**（点击框内一键复制）：\n\n`【{key}】{summary}\n{url}`",
+                    parse_mode="Markdown",
+                )
+            return
+
+        if query.data == "jira_editpublished":
+            last_pub = context.user_data.get("last_published") if context.user_data else None
+            if last_pub and query.message is not None:
+                if context.user_data is not None:
+                    context.user_data["editing_published_key"] = last_pub["key"]
+                    context.user_data["pending_template"] = last_pub["template"]
+                    context.user_data["editing_draft"] = True
+
+                from .analysis import jira_template_editable_text
+
+                editable_text = jira_template_editable_text(last_pub["template"])
+                await query.message.reply_text(
+                    f"✏️ **编辑已发布工单 ({last_pub['key']})**\n\n"
+                    "请点击/复制下方代码框内的完整文字，在输入框中修改后发送给机器人直接更新：\n\n"
+                    f"```\n{editable_text}\n```",
+                    parse_mode="Markdown",
+                )
             return
 
         if query.data == "jira_edit":
@@ -452,15 +598,47 @@ def build_forward_handlers(
                 )
             return
 
+        if context.user_data is not None:
+            context.user_data["last_published"] = {
+                "key": result.key,
+                "url": result.url,
+                "summary": template.summary,
+                "template": template,
+            }
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "\U0001f517 仅复制链接", callback_data="jira_copylink"
+                    ),
+                    InlineKeyboardButton(
+                        "\U0001f4cb 复制链接与摘要", callback_data="jira_copysummary"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        "\u270f\ufe0f 编辑此工单", callback_data="jira_editpublished"
+                    ),
+                ],
+            ]
+        )
+
         if query.message is not None:
             await query.message.reply_text(
-                f"\u2705 Jira 工单创建成功: {result.key}\n{result.url}"
+                f"\u2705 **Jira 工单创建成功！**\n\n"
+                f"**Key**: `{result.key}`\n"
+                f"**标题**: {template.summary}\n"
+                f"**链接**: {result.url}",
+                reply_markup=keyboard,
+                parse_mode="Markdown",
             )
 
     return (
+        CommandHandler("new", new_issue_command),
         MessageHandler(ForwardOrReplyToForwardFilter(), analyze_forward),
         MessageHandler(filters.TEXT & (~filters.COMMAND), handle_edited_text_input),
         CallbackQueryHandler(
-            handle_issue_callback, pattern=r"^jira_(confirm|edit|cancel)$"
+            handle_issue_callback, pattern=r"^jira_(confirm|edit|cancel|copylink|copysummary|editpublished)$"
         ),
     )

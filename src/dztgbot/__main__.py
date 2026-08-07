@@ -64,10 +64,25 @@ async def run() -> None:
         rules_store=rules_store,
         default_project_key=settings.jira_default_project_key,
     )
+    async def post_init(app: Application) -> None:
+        from telegram import BotCommand
+        try:
+            await app.bot.set_my_commands(
+                [
+                    BotCommand("start", "开始使用 / 查看帮助"),
+                    BotCommand("new", "📝 手动创建 Jira 工单"),
+                    BotCommand("auth", "🔑 绑定 Jira 账号"),
+                    BotCommand("logout", "🚪 解绑 Jira 账号"),
+                ]
+            )
+        except Exception as err:
+            LOGGER.warning("Could not set bot commands: %s", err)
+
     application = (
         Application.builder()
         .token(settings.telegram_bot_token)
         .concurrent_updates(settings.telegram_concurrent_updates)
+        .post_init(post_init)
         .build()
     )
     application.add_error_handler(handle_application_error)

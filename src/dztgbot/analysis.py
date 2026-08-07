@@ -280,3 +280,27 @@ def parse_edited_template(raw_text: str, original: JiraTaskTemplate) -> JiraTask
         assignee=assignee,
         acceptance_criteria=final_ac,
     )
+
+
+def validate_template_fields(template: JiraTaskTemplate) -> list[str]:
+    """Validate template fields and return a list of human-readable error messages if any field is invalid."""
+    errors: list[str] = []
+
+    if not template.summary or not template.summary.strip():
+        errors.append("标题 (Summary) 不能为空。")
+    elif len(template.summary) > 255:
+        errors.append("标题 (Summary) 过长，最大长度为 255 个字符。")
+
+    if not template.description or not template.description.strip():
+        errors.append("详细描述 (Description) 不能为空。")
+
+    allowed_types = ["Task", "Epic", "缺陷", "优化"]
+    if template.issuetype not in allowed_types:
+        errors.append(
+            f"工单类型 '{template.issuetype}' 不符合项目规范，当前允许类型: [{', '.join(allowed_types)}]"
+        )
+
+    if template.project_key and not template.project_key.isalnum():
+        errors.append(f"项目 Key '{template.project_key}' 格式无效。")
+
+    return errors

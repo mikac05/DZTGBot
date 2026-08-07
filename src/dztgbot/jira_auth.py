@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from telegram import Update
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import (
     BaseHandler,
     CommandHandler,
@@ -41,25 +41,30 @@ def build_auth_handlers(
         if message is None or user is None:
             return
 
+        keyboard = ReplyKeyboardMarkup(
+            [["📝 手动创建 Jira 工单"]],
+            resize_keyboard=True,
+        )
+
         credentials = await user_store.get(user.id)
         if credentials:
             await message.reply_text(
-                f"👋 Welcome back! You're connected to Jira as "
+                f"👋 欢迎使用 DZTGBot！当前绑定的 Jira 账号: "
                 f'"{credentials.jira_display_name}" '
                 f"({credentials.jira_username}).\n\n"
-                "Forward any message to me and I'll help create a Jira issue.\n\n"
-                "Commands:\n"
-                "/auth — reconnect or change Jira account\n"
-                "/logout — disconnect your Jira account"
+                "您可以直接转发消息给机器人生成工单，或点击下方 [📝 手动创建 Jira 工单] / 使用 /new 手动创建。\n\n"
+                "常用命令：\n"
+                "/new — 📝 手动创建 Jira 工单\n"
+                "/auth — 🔑 重新绑定 Jira 账号\n"
+                "/logout — 🚪 解绑 Jira 账号",
+                reply_markup=keyboard,
             )
         else:
             await message.reply_text(
-                "👋 Welcome to DZTGBot!\n\n"
-                "I help you create Jira issues from Telegram messages. "
-                "Forward any message to me, I'll analyze it with AI, "
-                "show you a preview, and create the issue on your Jira board "
-                "with one tap.\n\n"
-                "To get started, use /auth to connect your Jira account."
+                "👋 欢迎使用 DZTGBot！\n\n"
+                "转发任何消息给机器人，或点击下方 [📝 手动创建 Jira 工单] 按钮即可快速创建 Jira 工单。\n\n"
+                f"使用前请先发送 /auth 绑定您的 Jira 账号。",
+                reply_markup=keyboard,
             )
 
     async def auth_entry(

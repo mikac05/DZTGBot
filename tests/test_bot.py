@@ -286,6 +286,24 @@ class PreviewTests(unittest.TestCase):
         self.assertIn("Modified Description line 1", parsed.description)
         self.assertEqual(parsed.acceptance_criteria, ["New Criterion 1", "New Criterion 2"])
 
+    def test_validate_template_fields(self) -> None:
+        from dztgbot.analysis import validate_template_fields
+        invalid_template = JiraTaskTemplate(
+            summary="",
+            description="",
+            issuetype="InvalidType",
+            labels=[],
+            priority="Medium",
+            project_key="NGSSA3",
+            components=[],
+            assignee=None,
+            acceptance_criteria=[],
+        )
+        errors = validate_template_fields(invalid_template)
+        self.assertTrue(any("标题" in e for e in errors))
+        self.assertTrue(any("详细描述" in e for e in errors))
+        self.assertTrue(any("工单类型" in e for e in errors))
+
 
 class GeminiAnalyzerTests(unittest.IsolatedAsyncioTestCase):
     async def test_valid_structured_response_is_locally_validated(self) -> None:

@@ -165,6 +165,61 @@ class JiraClient:
             LOGGER.info("Created Jira issue %s", issue_key)
             return CreatedIssue(key=issue_key, url=issue_url)
 
+    async def update_issue(
+        self, pat: str, issue_key: str, template: JiraTaskTemplate
+    ) -> CreatedIssue:
+        """Update fields of an existing Jira issue."""
+
+        fields: dict[str, object] = {
+            "summary": template.summary[:255],
+            "description": template.description,
+            "issuetype": {"name": template.issuetype},
+            "priority": {"name": template.priority},
+        }
+        payload = {"fields": fields}
+
+        async with self._make_client(pat) as client:
+            try:
+                response = await client.put(
+                    f"{self._api_url}/issue/{issue_key}", json=payload
+                )
+                response.raise_for_status()
+            except httpx.HTTPStatusError as error:
+                status = error.response.status_code
+                detail = self._extract_jira_error(error)
+                if status == 401:
+                    raise JiraClientError(
+                        "Authentication expired. Use /auth to reconnect."
+                    ) from error
+                if status == 400 and "issuetype" in detail.lower() and fields.get("issuetype", {}).get("name") != "Task":
+                    LOGGER.warning("Jira rejected issuetype '%s', retrying update with 'Task'", fields.get("issuetype", {}).get("name"))
+                    fields["issuetype"] = {"name": "Task"}
+                    try:
+                        retry_resp = await client.put(f"{self._api_url}/issue/{issue_key}", json={"fields": fields})
+                        retry_resp.raise_for_status()
+                        response = retry_resp
+                    except Exception:
+                        raise JiraClientError(f"Jira rejected issue update: {detail}") from error
+                elif status == 400 and detail:
+                    raise JiraClientError(f"Jira rejected issue update: {detail}") from error
+                else:
+                    raise JiraClientError(
+                        f"Jira returned HTTP {status}."
+                        + (f" {detail}" if detail else "")
+                    ) from error
+            except httpx.ConnectError as error:
+                raise JiraClientError(
+                    "Could not connect to Jira. Check VPN connectivity."
+                ) from error
+            except httpx.TimeoutException as error:
+                raise JiraClientError("Jira request timed out.") from error
+            except httpx.HTTPError as error:
+                raise JiraClientError("Jira request failed.") from error
+
+            issue_url = f"{self._base_url}/browse/{issue_key}"
+            LOGGER.info("Updated Jira issue %s", issue_key)
+            return CreatedIssue(key=issue_key, url=issue_url)
+
     def _make_client(self, token_or_auth: str) -> httpx.AsyncClient:
         headers = {
             "Content-Type": "application/json",
