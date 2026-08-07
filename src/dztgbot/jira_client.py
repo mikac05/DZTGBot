@@ -132,14 +132,24 @@ class JiraClient:
                     raise JiraClientError(
                         "Authentication expired. Use /auth to reconnect."
                     ) from error
-                if status == 400 and detail:
+                if status == 400 and "issuetype" in detail.lower() and fields.get("issuetype", {}).get("name") != "Task":
+                    LOGGER.warning("Jira rejected issuetype '%s', retrying with 'Task'", fields.get("issuetype", {}).get("name"))
+                    fields["issuetype"] = {"name": "Task"}
+                    try:
+                        retry_resp = await client.post(f"{self._api_url}/issue", json={"fields": fields})
+                        retry_resp.raise_for_status()
+                        response = retry_resp
+                    except Exception:
+                        raise JiraClientError(f"Jira rejected the issue: {detail}") from error
+                elif status == 400 and detail:
                     raise JiraClientError(
                         f"Jira rejected the issue: {detail}"
                     ) from error
-                raise JiraClientError(
-                    f"Jira returned HTTP {status}."
-                    + (f" {detail}" if detail else "")
-                ) from error
+                else:
+                    raise JiraClientError(
+                        f"Jira returned HTTP {status}."
+                        + (f" {detail}" if detail else "")
+                    ) from error
             except httpx.ConnectError as error:
                 raise JiraClientError(
                     "Could not connect to Jira. Check VPN connectivity."
