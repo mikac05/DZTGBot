@@ -98,7 +98,10 @@ async def run() -> None:
     stop_requested = asyncio.Event()
     loop = asyncio.get_running_loop()
     for shutdown_signal in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(shutdown_signal, stop_requested.set)
+        try:
+            loop.add_signal_handler(shutdown_signal, stop_requested.set)
+        except NotImplementedError:
+            break
 
     polling_started = False
     application_started = False
@@ -113,7 +116,10 @@ async def run() -> None:
                 await application.start()
                 application_started = True
                 LOGGER.info("DZTGBot is running")
-                await stop_requested.wait()
+                try:
+                    await stop_requested.wait()
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    pass
             finally:
                 if polling_started:
                     await updater.stop()
@@ -127,6 +133,8 @@ def main() -> None:
     # TODO: Add external health checks and service supervision in a later phase.
     try:
         asyncio.run(run())
+    except KeyboardInterrupt:
+        LOGGER.info("DZTGBot stopped by user.")
     except Exception as error:
         # Avoid default traceback rendering for provider exceptions because request
         # URLs can contain authentication material in some client implementations.
