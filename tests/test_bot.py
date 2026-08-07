@@ -245,8 +245,8 @@ class PreviewTests(unittest.TestCase):
         )
         preview = jira_template_preview(template)
         self.assertLessEqual(len(preview), 4000)
-        self.assertIn("Jira task preview (not created)", preview)
-        self.assertIn("Project: Not assigned", preview)
+        self.assertIn("Jira 工单草稿预览", preview)
+        self.assertIn("未指定", preview)
 
     def test_media_enum_serializes_to_expected_value(self) -> None:
         self.assertEqual(MediaType.PHOTO.value, "photo")
