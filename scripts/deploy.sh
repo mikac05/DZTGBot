@@ -124,8 +124,8 @@ detect_platform() {
     readonly PLATFORM_VERSION="${VERSION_ID:-}"
 
     case "${PLATFORM_ID}:${PLATFORM_VERSION}" in
-        ubuntu:22.04*) ;;
-        *) die "The only supported target is Ubuntu 22.04; detected ${PLATFORM_ID:-unknown} ${PLATFORM_VERSION:-unknown}." ;;
+        ubuntu:22.04*|ubuntu:24.04*) ;;
+        *) die "Supported target platforms are Ubuntu 22.04 and 24.04 LTS; detected ${PLATFORM_ID:-unknown} ${PLATFORM_VERSION:-unknown}." ;;
     esac
 }
 
@@ -282,7 +282,7 @@ ensure_service_account() {
 build_virtual_environment() {
     local python_candidate="${DZTGBOT_PYTHON_BIN:-}"
     if [[ -z "$python_candidate" ]]; then
-        python_candidate="$(command -v python3.12 || true)"
+        python_candidate="$(command -v python3.12 || command -v python3 || true)"
     fi
     [[ -n "$python_candidate" ]] || die "Python 3.12 is required. Supply an approved absolute binary through DZTGBOT_PYTHON_BIN."
     require_safe_absolute_path "DZTGBOT_PYTHON_BIN" "$python_candidate"
