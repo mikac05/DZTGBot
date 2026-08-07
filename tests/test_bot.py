@@ -251,6 +251,30 @@ class PreviewTests(unittest.TestCase):
     def test_media_enum_serializes_to_expected_value(self) -> None:
         self.assertEqual(MediaType.PHOTO.value, "photo")
 
+
+class JiraClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_add_attachment(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+        import httpx
+        from dztgbot.jira_client import JiraClient
+        client = JiraClient(base_url="https://jira.example.com")
+        with patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock) as mock_post:
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_post.return_value = mock_response
+
+            await client.add_attachment(
+                pat="test-pat",
+                issue_key="NGSSA3-1",
+                filename="test.jpg",
+                content=b"test-bytes",
+                mime_type="image/jpeg",
+            )
+            mock_post.assert_called_once()
+            args, kwargs = mock_post.call_args
+            self.assertIn("NGSSA3-1/attachments", args[0])
+            self.assertEqual(kwargs.get("headers"), {"X-Atlassian-Token": "no-check"})
+
     def test_editable_text_and_parser(self) -> None:
         from dztgbot.analysis import jira_template_editable_text, parse_edited_template
         original = JiraTaskTemplate(

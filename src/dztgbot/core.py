@@ -208,6 +208,10 @@ def build_forward_handlers(
         if forwarded is None:
             return
 
+        if forwarded.photo:
+            photo_id = forwarded.photo[-1].file_id
+            context.user_data.setdefault("pending_photo_file_ids", []).append(photo_id)
+
         record = extract_forwarded_message(forwarded)
         LOGGER.info(
             "Accepted forwarded message (media_type=%s, sender_available=%s, chat_available=%s)",
@@ -353,10 +357,18 @@ def build_forward_handlers(
         """Process user's edited text block when editing_draft is active."""
 
         incoming = update.effective_message
-        if incoming is None or not incoming.text or context.user_data is None:
+        if incoming is None or context.user_data is None:
             return
 
-        if incoming.text.strip() in ("/new", "📝 手動建立 Jira 工單", "📝 手动创建 Jira 工单"):
+        text_content = incoming.text or incoming.caption or ""
+        if incoming.photo:
+            photo_id = incoming.photo[-1].file_id
+            context.user_data.setdefault("pending_photo_file_ids", []).append(photo_id)
+
+        if not text_content and not incoming.photo:
+            return
+
+        if text_content.strip() in ("/new", "📝 手動建立 Jira 工單", "📝 手动创建 Jira 工单"):
             await new_issue_command(update, context)
             return
 
@@ -382,7 +394,7 @@ def build_forward_handlers(
                 acceptance_criteria=[],
             )
 
-        updated_template = parse_edited_template(incoming.text, original_template)
+        updated_template = parse_edited_template(text_content, original_template)
 
         # Validate template fields
         validation_errors = validate_template_fields(updated_template)
@@ -407,6 +419,22 @@ def build_forward_handlers(
                     res = await jira_client.update_issue(
                         credentials.jira_pat, published_key, updated_template
                     )
+                    photo_file_ids = context.user_data.pop("pending_photo_file_ids", [])
+                    uploaded_photos = 0
+                    for idx, file_id in enumerate(photo_file_ids, 1):
+                        try:
+                            tg_file = await context.bot.get_file(file_id)
+                            img_bytes = await tg_file.download_as_bytearray()
+                            filename = f"updated_image_{idx}.jpg"
+                            await jira_client.add_attachment(
+                                credentials.jira_pat, res.key, filename, bytes(img_bytes), mime_type="image/jpeg"
+                            )
+                            uploaded_photos += 1
+                        except Exception as err:
+                            LOGGER.error("Failed to upload photo %s to Jira issue %s (%s)", file_id, res.key, err)
+
+                    img_status = f"\n<b>附圖</b>: 已成功上傳 {uploaded_photos} 張圖片至 Jira 工單" if uploaded_photos > 0 else ""
+
                     context.user_data["editing_draft"] = False
                     context.user_data["last_published"] = {
                         "key": res.key,
@@ -432,7 +460,7 @@ def build_forward_handlers(
                         ]
                     )
                     await incoming.reply_text(
-                        f"\u2705 <b>Jira 工單 {html.escape(res.key)} 更新成功！</b>\n{html.escape(res.url)}",
+                        f"\u2705 <b>Jira 工單 {html.escape(res.key)} 更新成功！</b>\n{html.escape(res.url)}{img_status}",
                         reply_markup=keyboard,
                         parse_mode="HTML",
                     )
@@ -484,6 +512,7 @@ def build_forward_handlers(
             if context.user_data is not None:
                 context.user_data["editing_draft"] = False
                 context.user_data.pop("editing_published_key", None)
+                context.user_data.pop("pending_photo_file_ids", None)
             try:
                 await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
@@ -602,6 +631,22 @@ def build_forward_handlers(
                 )
             return
 
+        photo_file_ids = context.user_data.pop("pending_photo_file_ids", []) if context.user_data else []
+        uploaded_photos = 0
+        for idx, file_id in enumerate(photo_file_ids, 1):
+            try:
+                tg_file = await context.bot.get_file(file_id)
+                img_bytes = await tg_file.download_as_bytearray()
+                filename = f"telegram_image_{idx}.jpg"
+                await jira_client.add_attachment(
+                    credentials.jira_pat, result.key, filename, bytes(img_bytes), mime_type="image/jpeg"
+                )
+                uploaded_photos += 1
+            except Exception as err:
+                LOGGER.error("Failed to upload photo %s to Jira issue %s (%s)", file_id, result.key, err)
+
+        img_status = f"\n<b>附圖</b>: 已成功上傳 {uploaded_photos} 張圖片至 Jira 工單" if uploaded_photos > 0 else ""
+
         if context.user_data is not None:
             context.user_data["last_published"] = {
                 "key": result.key,
@@ -633,7 +678,7 @@ def build_forward_handlers(
                 f"\u2705 <b>Jira 工單建立成功！</b>\n\n"
                 f"<b>Key</b>: <code>{html.escape(result.key)}</code>\n"
                 f"<b>標題</b>: {html.escape(template.summary)}\n"
-                f"<b>連結</b>: {html.escape(result.url)}",
+                f"<b>連結</b>: {html.escape(result.url)}{img_status}",
                 reply_markup=keyboard,
                 parse_mode="HTML",
             )
@@ -641,7 +686,7 @@ def build_forward_handlers(
     return (
         CommandHandler("new", new_issue_command),
         MessageHandler(ForwardOrReplyToForwardFilter(), analyze_forward),
-        MessageHandler(filters.TEXT & (~filters.COMMAND), handle_edited_text_input),
+        MessageHandler((filters.TEXT | filters.PHOTO) & (~filters.COMMAND), handle_edited_text_input),
         CallbackQueryHandler(
             handle_issue_callback, pattern=r"^jira_(confirm|edit|cancel|copylink|copysummary|editpublished)$"
         ),

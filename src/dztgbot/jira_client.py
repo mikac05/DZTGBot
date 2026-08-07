@@ -220,9 +220,43 @@ class JiraClient:
             LOGGER.info("Updated Jira issue %s", issue_key)
             return CreatedIssue(key=issue_key, url=issue_url)
 
+    async def add_attachment(
+        self,
+        pat: str,
+        issue_key: str,
+        filename: str,
+        content: bytes,
+        mime_type: str = "image/jpeg",
+    ) -> None:
+        """Upload a file attachment to an existing Jira issue."""
+
+        async with self._make_client(pat) as client:
+            headers = {"X-Atlassian-Token": "no-check"}
+            files = {"file": (filename, content, mime_type)}
+            try:
+                response = await client.post(
+                    f"{self._api_url}/issue/{issue_key}/attachments",
+                    headers=headers,
+                    files=files,
+                )
+                response.raise_for_status()
+                LOGGER.info("Successfully attached %s to Jira issue %s", filename, issue_key)
+            except httpx.HTTPStatusError as error:
+                detail = self._extract_jira_error(error)
+                LOGGER.error(
+                    "Failed to attach %s to Jira issue %s: HTTP %s (%s)",
+                    filename,
+                    issue_key,
+                    error.response.status_code,
+                    detail,
+                )
+                raise JiraClientError(f"Attachment upload failed: HTTP {error.response.status_code}") from error
+            except Exception as error:
+                LOGGER.error("Attachment upload error for %s (%s)", filename, type(error).__name__)
+                raise JiraClientError("Attachment upload failed due to network error.") from error
+
     def _make_client(self, token_or_auth: str) -> httpx.AsyncClient:
         headers = {
-            "Content-Type": "application/json",
             "Accept": "application/json",
         }
         raw = token_or_auth.strip()
