@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 from dataclasses import dataclass
 
@@ -154,13 +155,27 @@ class JiraClient:
             LOGGER.info("Created Jira issue %s", issue_key)
             return CreatedIssue(key=issue_key, url=issue_url)
 
-    def _make_client(self, pat: str) -> httpx.AsyncClient:
+    def _make_client(self, token_or_auth: str) -> httpx.AsyncClient:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        raw = token_or_auth.strip()
+        if raw.startswith("Basic ") or raw.startswith("Bearer "):
+            headers["Authorization"] = raw
+        elif ":" in raw and not raw.startswith("http"):
+            encoded = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {encoded}"
+        elif "JSESSIONID=" in raw or raw.isalnum() and len(raw) > 20 and not raw.startswith("ATATT"):
+            if "JSESSIONID=" in raw:
+                headers["Cookie"] = raw if raw.startswith("JSESSIONID=") else f"JSESSIONID={raw}"
+            else:
+                headers["Authorization"] = f"Bearer {raw}"
+        else:
+            headers["Authorization"] = f"Bearer {raw}"
+
         return httpx.AsyncClient(
-            headers={
-                "Authorization": f"Bearer {pat}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            headers=headers,
             verify=self._verify_ssl,
             timeout=self._timeout_seconds,
         )
