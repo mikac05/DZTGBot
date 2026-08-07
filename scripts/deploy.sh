@@ -300,6 +300,8 @@ build_virtual_environment() {
 
     chown -R "root:$SERVICE_GROUP" "$VENV_DIR"
     chmod -R u=rwX,g=rX,o= "$VENV_DIR"
+    chmod a+rx "$PROJECT_DIR"
+    chmod -R a+rX "$PROJECT_DIR/src"
     if ! runuser -u "$DZTGBOT_SERVICE_USER" -- test -r "$PROJECT_DIR/src/dztgbot/__main__.py"; then
         die "The service account cannot read the project. Move it outside a private home/root directory or correct directory traversal permissions."
     fi
