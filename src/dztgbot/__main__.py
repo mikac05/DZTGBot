@@ -1,0 +1,123 @@
+"""Long-running async entry point for DZTGBot."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import signal
+
+from telegram.ext import Application, ContextTypes
+
+from .admin import build_admin_handlers
+from .analysis import GeminiAnalyzer
+from .config import Settings
+from .core import build_forward_handler
+from .rules import RulesStore
+from .vpn import NetworkManagerL2tpManager
+
+LOGGER = logging.getLogger(__name__)
+
+
+async def handle_application_error(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Log an unexpected handler failure without serializing the Telegram update."""
+
+    error = context.error
+    LOGGER.error("Unhandled Telegram handler error (%s)", type(error).__name__)
+
+
+async def run() -> None:
+    settings = Settings.from_environment()
+    logging.basicConfig(
+        level=settings.log_level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+    rules_store = RulesStore(settings.jira_rules_path)
+    await rules_store.initialize()
+    vpn_manager = NetworkManagerL2tpManager(
+        enabled=settings.vpn_enabled,
+        connection_name=settings.vpn_connection_name,
+        profile_path=settings.vpn_profile_path,
+        allow_start=settings.vpn_allow_start,
+        nmcli_bin=settings.vpn_nmcli_bin,
+        sudo_bin=settings.vpn_sudo_bin,
+        command_timeout_seconds=settings.vpn_command_timeout_seconds,
+    )
+    initial_vpn_status = await vpn_manager.status()
+    LOGGER.info("Initial VPN state: %s", initial_vpn_status.state)
+    analyzer = GeminiAnalyzer(
+        api_key=settings.gemini_api_key,
+        model=settings.gemini_model,
+        timeout_seconds=settings.gemini_timeout_seconds,
+        rules_store=rules_store,
+    )
+    application = (
+        Application.builder()
+        .token(settings.telegram_bot_token)
+        .concurrent_updates(settings.telegram_concurrent_updates)
+        .build()
+    )
+    application.add_error_handler(handle_application_error)
+    application.add_handlers(
+        [
+            *build_admin_handlers(
+                rules_store,
+                settings.telegram_admin_user_ids,
+                vpn_manager,
+            ),
+            build_forward_handler(analyzer, vpn_manager),
+        ]
+    )
+
+    updater = application.updater
+    if updater is None:
+        raise RuntimeError("The Telegram updater is unavailable; polling cannot start.")
+
+    stop_requested = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for shutdown_signal in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(shutdown_signal, stop_requested.set)
+
+    polling_started = False
+    application_started = False
+    try:
+        async with application:
+            try:
+                await updater.start_polling(
+                    allowed_updates=("message",),
+                    bootstrap_retries=3,
+                )
+                polling_started = True
+                await application.start()
+                application_started = True
+                LOGGER.info("DZTGBot is running")
+                await stop_requested.wait()
+            finally:
+                if polling_started:
+                    await updater.stop()
+                if application_started:
+                    await application.stop()
+    finally:
+        await analyzer.aclose()
+
+
+def main() -> None:
+    # TODO: Add external health checks and service supervision in a later phase.
+    try:
+        asyncio.run(run())
+    except Exception as error:
+        # Avoid default traceback rendering for provider exceptions because request
+        # URLs can contain authentication material in some client implementations.
+        logging.basicConfig(
+            level=logging.ERROR,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+        LOGGER.critical("DZTGBot terminated (%s)", type(error).__name__)
+        raise SystemExit(1) from None
+
+
+if __name__ == "__main__":
+    main()

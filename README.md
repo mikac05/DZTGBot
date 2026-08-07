@@ -1,0 +1,157 @@
+# DZTGBot
+
+Python 3.12 service that accepts forwarded Telegram messages, asks Gemini for a strictly validated Jira task template, and returns a human-reviewable preview. Jira issue creation is intentionally not implemented yet.
+
+The Telegram client is `python-telegram-bot`: it provides a lightweight async polling API without requiring a web server. Gemini uses Google's current `google-genai` SDK with its async client and local Pydantic validation.
+
+## What the bot processes
+
+- Direct Telegram forwards.
+- A message that directly replies to a forward; the original forwarded content is analyzed.
+- Text, captions, and a normalized media type.
+- Ordinary messages and replies to ordinary messages are ignored.
+- A bounded number of updates remain concurrently responsive while Gemini requests are in flight.
+
+Administrator commands are `/rules`, `/setrules`, `/vpn`, and `/vpnstart`. See `docs/end-to-end-test-plan.md` for exact behavior and expected replies.
+
+## Cross-account and cross-device continuity
+
+The repository contains a portable AI handoff under `docs/context/`, governed by `AGENTS.md`. It transfers project facts, decisions, verification, open items, and the exact next action—but never credentials or authenticated sessions.
+
+In ChatGPT/Codex or another AI coding application, use these natural commands:
+
+```text
+DZTGBot handoff
+DZTGBot continue
+```
+
+`DZTGBot handoff` refreshes the durable context, runs safety validation, commits all non-ignored project changes, and pushes the current branch. `DZTGBot continue` refuses to overwrite local work, fast-forwards a clean checkout, validates the context, and resumes the recorded next action.
+
+Google Antigravity also exposes native workspace workflows:
+
+```text
+/dztgbot-handoff
+/dztgbot-continue
+```
+
+On a different computer, clone this repository, open the clone as the project/workspace, and issue `DZTGBot continue`. Git authentication must be configured separately on that computer. `.env`, private VPN profiles, private XML, server access, browser sessions, connectors, and AI account memory do not travel through Git.
+
+## Local development
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+mkdir -p var
+cp config/jira_rules.example.txt var/jira_rules.txt
+PYTHONPATH=src python -m dztgbot
+```
+
+Replace required `TODO_...` values only in the ignored local `.env`. Never place real credentials in Git, commands, logs, screenshots, or documentation.
+
+Run the offline tests with:
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests -v
+```
+
+## Automated target-server deployment
+
+The deployment script supports these explicit targets:
+
+- Ubuntu 22.04 with a separately approved Python 3.12 installation.
+- Oracle Linux 9.4 or later, where the script can install Python 3.12 and its virtual-environment tooling from AppStream as documented in [Oracle Linux Python guidance](https://docs.oracle.com/en/operating-systems/oracle-linux/9/python/python-InstallingThirdPartyPackages.html). Earlier Oracle Linux 9 releases require an administrator-supplied Python 3.12 path.
+
+It refuses unknown distributions and other major versions. It does not open firewall ports, enable NetworkManager, load a VPN profile, or start the full VPN tunnel.
+
+Choose a dedicated service-account name and a protected environment-file path. These values are deliberately not hard-coded:
+
+```bash
+sudo \
+  DZTGBOT_SERVICE_USER=TODO_REPLACE_WITH_SERVICE_USER \
+  DZTGBOT_ENV_FILE=/TODO_REPLACE_WITH_ABSOLUTE_ENVIRONMENT_FILE \
+  bash scripts/deploy.sh
+```
+
+On the first run, if the environment file does not exist, the script creates a root-owned `0600` placeholder copy and exits. Edit that file with `sudoedit`, replace the required values privately, set `JIRA_RULES_PATH=/var/lib/dztgbot/jira_rules.txt`, and run the same deployment command again. The environment file and VPN profile must be in root-managed directories that are not writable by other users.
+
+Ubuntu 22.04 does not provide Python 3.12 as its default Python. If `python3.12` is not already in `PATH`, provide the absolute approved interpreter path:
+
+```bash
+sudo \
+  DZTGBOT_SERVICE_USER=TODO_REPLACE_WITH_SERVICE_USER \
+  DZTGBOT_ENV_FILE=/TODO_REPLACE_WITH_ABSOLUTE_ENVIRONMENT_FILE \
+  DZTGBOT_PYTHON_BIN=/TODO_REPLACE_WITH_ABSOLUTE_PYTHON_3_12 \
+  bash scripts/deploy.sh
+```
+
+Set `DZTGBOT_INSTALL_SYSTEM_PACKAGES=false` only when an administrator has already installed and verified every required operating-system package.
+
+On Oracle Linux, NetworkManager L2TP is provided by `ol9_developer_EPEL`. The installer requires a deliberate `DZTGBOT_ALLOW_ORACLE_DEVELOPER_EPEL=true` deployment-time opt-in before it will enable that repository. Ubuntu does not use this option.
+
+The script safely reruns for updates. It also removes its own narrowly scoped VPN sudoers file when `VPN_ALLOW_START` is changed back to `false`; it refuses to touch a file at that path if it was not generated by this script.
+
+It:
+
+1. Detects and validates the operating system.
+2. Validates the root-owned `0600` environment file without displaying values.
+3. Creates or validates a dedicated non-login service account.
+4. Builds the project `.venv` with Python 3.12 and installs `requirements.txt`.
+5. Runs dependency, compilation, and offline unit-test checks.
+6. Creates the protected rules state and preserves existing runtime rules.
+7. Installs VPN client packages only when `VPN_ENABLED=true`.
+8. Generates exact VPN sudoers rules only when `VPN_ALLOW_START=true`.
+9. Renders and verifies the hardened systemd unit.
+10. Enables, starts, or restarts `dztgbot.service` and checks that it is active.
+
+The project checkout must be readable but not writable by the service account and must not be under an inaccessible private home directory.
+
+## Secrets and runtime state
+
+The systemd manager reads the protected environment file before changing to the non-root account. The deployment script requires it to be:
+
+- Outside the project checkout.
+- A regular non-symlink file.
+- Owned by root.
+- Mode `0600` exactly.
+
+Runtime rules live under `/var/lib/dztgbot`, which is the only application state path made writable by the hardened unit. Rules are saved atomically, hot-reloaded, and backed up to a previous version.
+
+Rotate Telegram and Gemini credentials by editing the protected environment file, restarting the service, verifying the replacement, and then revoking the old value. Never pass a secret directly to `scripts/deploy.sh`.
+
+## L2TP/IPsec compatibility
+
+The private `src/ref/vpnsettings.xml` remains ignored by Git. Only these non-secret compatibility characteristics were used:
+
+| Windows profile setting | Linux mapping |
+| --- | --- |
+| L2TP tunnel | NetworkManager L2TP plugin |
+| IPsec PSK authentication | Private `ipsec-psk` value |
+| MS-CHAPv2 | MS-CHAPv2 enabled; weaker alternatives refused |
+| Optional PPP encryption | `require-mppe=no`, pending supervised compatibility confirmation |
+| Split tunneling disabled | Full tunnel via `never-default=false` |
+
+The tracked `config/l2tp-ipsec.example.nmconnection` contains placeholders only. Copy it to an approved private path outside the checkout, replace values there, set root ownership and mode `0600`, and configure `VPN_PROFILE_PATH` and `VPN_CONNECTION_NAME` in the protected environment file.
+
+For Ubuntu 22.04, `network-manager-l2tp` depends on NetworkManager, PPP, `xl2tpd`, and an IPsec implementation. For Oracle Linux 9, the installer uses the Oracle EPEL-compatible repository for the L2TP plugin and `xl2tpd`. Package availability should be reviewed against the [Ubuntu Jammy package record](https://packages.ubuntu.com/jammy/network-manager-l2tp) or [Oracle Linux repositories](https://yum.oracle.com/oracle-linux-9.html) before a maintenance window.
+
+If NetworkManager is inactive, the installer stops. Enable it only from an out-of-band console after confirming which service owns the primary interface. The installer also refuses to continue when a pre-existing system `xl2tpd` service may already own UDP port 1701.
+
+The private profile specifies a full tunnel. Keep `VPN_ALLOW_START=false` until console-supervised testing proves SSH recovery and Telegram/Gemini routing. Stopping the bot does not disconnect an already-active tunnel.
+
+## Service operations
+
+```bash
+sudo systemctl status dztgbot.service --no-pager
+sudo systemctl restart dztgbot.service
+sudo systemctl stop dztgbot.service
+sudo systemctl disable dztgbot.service
+sudo journalctl -u dztgbot.service -f
+```
+
+The service logs to journald and must never log tokens, keys, forwarded text, generated descriptions, VPN endpoints, or VPN credentials.
+
+## Production verification
+
+Follow `docs/end-to-end-test-plan.md`. A real Telegram exchange requires a developer-owned bot token, and a Gemini success test requires a private API key and supported model identifier. Untouched placeholders are intentionally rejected.

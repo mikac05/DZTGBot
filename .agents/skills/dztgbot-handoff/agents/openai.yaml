@@ -1,0 +1,4 @@
+interface:
+  display_name: "DZTGBot Handoff"
+  short_description: "Save and resume durable project context"
+  default_prompt: "Use $dztgbot-handoff to save or resume the DZTGBot project across AI accounts and devices."

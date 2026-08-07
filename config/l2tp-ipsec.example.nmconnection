@@ -1,0 +1,39 @@
+# PLACEHOLDER TEMPLATE ONLY. Never put real VPN values in this tracked file.
+# TODO: Copy this file to /etc/NetworkManager/system-connections/ on the Linux
+# server, replace every TODO value there, and set owner root:root and mode 0600.
+
+[connection]
+id=TODO_REPLACE_WITH_LOCAL_NETWORKMANAGER_CONNECTION_NAME
+uuid=TODO_REPLACE_WITH_GENERATED_CONNECTION_UUID
+type=vpn
+autoconnect=false
+permissions=
+
+[vpn]
+service-type=org.freedesktop.NetworkManager.l2tp
+gateway=TODO_REPLACE_WITH_VPN_SERVER_ADDRESS
+user=TODO_REPLACE_WITH_VPN_USERNAME
+password-flags=0
+ipsec-enabled=yes
+ipsec-psk=TODO_REPLACE_WITH_IPSEC_PRESHARED_KEY
+
+# These settings mirror the supplied Windows profile's MS-CHAPv2 authentication.
+refuse-eap=yes
+refuse-pap=yes
+refuse-chap=yes
+refuse-mschap=yes
+refuse-mschapv2=no
+
+# TODO: The source profile permits optional data encryption. Confirm the approved
+# NetworkManager-l2tp/PPP compatibility setting during a console-supervised test.
+require-mppe=no
+
+[vpn-secrets]
+password=TODO_REPLACE_WITH_VPN_PASSWORD
+
+[ipv4]
+method=auto
+never-default=false
+
+[ipv6]
+method=ignore

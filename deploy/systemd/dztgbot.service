@@ -1,0 +1,73 @@
+[Unit]
+Description=DZTGBot Telegram service
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+
+# TODO / PLACEHOLDER: Replace both values with the dedicated non-root service account.
+User=TODO_REPLACE_WITH_SERVICE_USER
+Group=TODO_REPLACE_WITH_SERVICE_GROUP
+
+# TODO / PLACEHOLDER: Replace with the absolute project checkout directory.
+# Keep the production checkout outside a writable home directory when possible.
+WorkingDirectory=/TODO_REPLACE_WITH_ABSOLUTE_PROJECT_DIRECTORY
+
+# TODO / PLACEHOLDER: Replace with the absolute protected environment-file path.
+EnvironmentFile=/TODO_REPLACE_WITH_ABSOLUTE_ENVIRONMENT_FILE
+
+# TODO / PLACEHOLDER: Replace both project paths and the virtual-environment Python path.
+Environment="PYTHONPATH=/TODO_REPLACE_WITH_ABSOLUTE_PROJECT_DIRECTORY/src"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/TODO_REPLACE_WITH_ABSOLUTE_VENV_PYTHON -m dztgbot
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# systemd creates /var/lib/dztgbot for the non-root service account.
+# TODO: Set JIRA_RULES_PATH=/var/lib/dztgbot/jira_rules.txt in the environment file.
+StateDirectory=dztgbot
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/dztgbot
+
+# Send application output to journald. The application must never log secrets.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dztgbot
+
+# Process and filesystem hardening suitable for the Python service.
+UMask=0077
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+RemoveIPC=true
+
+# The optional /vpnstart command uses narrowly scoped sudoers entries for nmcli.
+# The deployment script renders this as false only when VPN_ALLOW_START=true.
+NoNewPrivileges=TODO_REPLACE_WITH_NO_NEW_PRIVILEGES
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
