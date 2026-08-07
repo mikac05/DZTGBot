@@ -58,7 +58,7 @@ PYTHONPATH=src python -m unittest discover -s tests -v
 
 ## Automated target-server deployment
 
-The deployment script supports Ubuntu 22.04 only, with a separately approved Python 3.12 installation. It refuses every other distribution or Ubuntu release. It does not open firewall ports, enable NetworkManager, load a VPN profile, or start the full VPN tunnel.
+The deployment script supports Ubuntu 24.04 only, using Python 3.12 (the default Python on Ubuntu 24.04 LTS). It refuses every other distribution or Ubuntu release. It does not open firewall ports, enable NetworkManager, load a VPN profile, or start the full VPN tunnel.
 
 Choose a dedicated service-account name and a protected environment-file path. These values are deliberately not hard-coded:
 
@@ -70,16 +70,6 @@ sudo \
 ```
 
 On the first run, if the environment file does not exist, the script creates a root-owned `0600` placeholder copy and exits. Edit that file with `sudoedit`, replace the required values privately, set `JIRA_RULES_PATH=/var/lib/dztgbot/jira_rules.txt`, and run the same deployment command again. The environment file and VPN profile must be in root-managed directories that are not writable by other users.
-
-Ubuntu 22.04 does not provide Python 3.12 as its default Python. If `python3.12` is not already in `PATH`, provide the absolute approved interpreter path:
-
-```bash
-sudo \
-  DZTGBOT_SERVICE_USER=TODO_REPLACE_WITH_SERVICE_USER \
-  DZTGBOT_ENV_FILE=/TODO_REPLACE_WITH_ABSOLUTE_ENVIRONMENT_FILE \
-  DZTGBOT_PYTHON_BIN=/TODO_REPLACE_WITH_ABSOLUTE_PYTHON_3_12 \
-  bash scripts/deploy.sh
-```
 
 Set `DZTGBOT_INSTALL_SYSTEM_PACKAGES=false` only when an administrator has already installed and verified every required operating-system package.
 

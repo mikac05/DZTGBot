@@ -38,8 +38,8 @@ DZTGBot is a long-running Python 3.12 Telegram bot intended for a privately mana
 
 ## Deployment facts
 
-- The installer accepts Ubuntu 22.04 LTS and Ubuntu 24.04 LTS and refuses unsupported distributions.
-- Python 3.12 is the default system interpreter on Ubuntu 24.04 LTS; on Ubuntu 22.04 LTS, python3.12 is selected automatically when present.
+- The installer accepts Ubuntu 24.04 only and refuses every other distribution or release.
+- Python 3.12 is the default system interpreter on Ubuntu 24.04 LTS.
 - The installer never enables NetworkManager or starts the full-tunnel VPN automatically.
 - The protected environment file and VPN profile must stay outside the checkout, root-owned, and mode `0600`.
 

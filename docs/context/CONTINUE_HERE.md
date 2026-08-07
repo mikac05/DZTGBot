@@ -15,14 +15,14 @@ The full end-to-end bot pipeline is implemented and tested:
 ## Exact next action
 
 1. Resolve Git write access to `origin` (or update remote URL) and push the branch.
-2. Transfer or clone the repository to the target Ubuntu 22.04 server.
+2. Transfer or clone the repository to the target Ubuntu 24.04 server.
 3. Run `sudo DZTGBOT_SERVICE_USER=dztgbot DZTGBOT_ENV_FILE=/etc/dztgbot/env bash scripts/deploy.sh` to generate `/etc/dztgbot/env`.
 4. Configure `/etc/dztgbot/env` via `sudoedit /etc/dztgbot/env` with real credentials (`TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `JIRA_URL`, `TELEGRAM_ADMIN_USER_IDS`).
 5. Re-run `deploy.sh` to complete installation and start `dztgbot.service`.
 
 ## Inputs still required from the user or target environment
 
-- Confirm target server OS is Ubuntu 22.04 LTS.
+- Confirm target server OS is Ubuntu 24.04 LTS.
 - Real `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `GEMINI_MODEL`, and `JIRA_URL` values (to be configured in `/etc/dztgbot/env`).
 - User Personal Access Tokens (PATs) submitted via `/auth` in private Telegram chat with the bot.
 - If L2TP/IPsec VPN is required, the private `.nmconnection` profile installed at mode 0600 on the server.

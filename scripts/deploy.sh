@@ -124,8 +124,8 @@ detect_platform() {
     readonly PLATFORM_VERSION="${VERSION_ID:-}"
 
     case "${PLATFORM_ID}:${PLATFORM_VERSION}" in
-        ubuntu:22.04*|ubuntu:24.04*) ;;
-        *) die "Supported target platforms are Ubuntu 22.04 and 24.04 LTS; detected ${PLATFORM_ID:-unknown} ${PLATFORM_VERSION:-unknown}." ;;
+        ubuntu:24.04*) ;;
+        *) die "The only supported target is Ubuntu 24.04; detected ${PLATFORM_ID:-unknown} ${PLATFORM_VERSION:-unknown}." ;;
     esac
 }
 

@@ -15,8 +15,8 @@ Complete end-to-end implementation of DZTGBot — an async Python 3.12 Telegram 
 - Implemented interactive Telegram preview rendering in `core.py` with inline confirmation buttons (`[✅ Create Issue]` / `[❌ Cancel]`).
 - Added runtime Jira rules management with admin-only hot updates and last-known-good fallback (`rules.py`, `admin.py`).
 - Added NetworkManager L2TP/IPsec status/start support (`vpn.py`).
-- Added hardened systemd service (`deploy/systemd/dztgbot.service`) and rerunnable Ubuntu 22.04 deployment script (`scripts/deploy.sh`).
-- Wrote step-by-step deployment guide for Ubuntu 22.04.
+- Added hardened systemd service (`deploy/systemd/dztgbot.service`) and rerunnable Ubuntu 24.04 deployment script (`scripts/deploy.sh`).
+- Wrote step-by-step deployment guide for Ubuntu 24.04.
 - Added 24 offline behavioral, credential storage, and secret-safety tests.
 
 ## Decisions
@@ -26,7 +26,7 @@ Complete end-to-end implementation of DZTGBot — an async Python 3.12 Telegram 
 - `DZTGBot continue` may fetch and fast-forward only when the checkout is clean.
 - Per-user Jira authentication: users send their Jira Personal Access Token via `/auth` in private chat; tokens are auto-deleted from chat history and stored in `user_credentials.json` (mode 0600).
 - Explicit human confirmation: previews feature inline `[✅ Create Issue]` and `[❌ Cancel]` buttons; issues are created only upon explicit user tap.
-- Target platform is strictly Ubuntu 22.04.
+- Target platform is strictly Ubuntu 24.04.
 - Secrets are kept outside tracked files (in environment variables or `/etc/dztgbot/env`).
 
 ## Open items
@@ -37,7 +37,7 @@ Complete end-to-end implementation of DZTGBot — an async Python 3.12 Telegram 
 
 ## Exact next action
 
-Resolve Git remote `origin` write permission (or update remote URL), run `DZTGBot handoff` again to push, and then follow `scripts/deploy.sh` instructions to deploy on the target Ubuntu 22.04 server.
+Resolve Git remote `origin` write permission (or update remote URL), run `DZTGBot handoff` again to push, and then follow `scripts/deploy.sh` instructions to deploy on the target Ubuntu 24.04 server.
 
 ## Verification
 
@@ -52,10 +52,10 @@ Git does not transfer `.env`, private VPN files, tokens, keys, server access, Te
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-07T03:48:00Z`
+- Generated UTC: `2026-08-07T03:50:22Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `e324b8d98d22`
-- Working-tree entries before metadata refresh: `2`
+- Base commit before this handoff: `60d728f0de79`
+- Working-tree entries before metadata refresh: `7`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->
