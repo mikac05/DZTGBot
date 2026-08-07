@@ -295,8 +295,8 @@ build_virtual_environment() {
     "$python_candidate" -m venv "$VENV_DIR"
     "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$PROJECT_DIR/requirements.txt"
     "$VENV_DIR/bin/python" -m pip check
-    PYTHONPATH="$PROJECT_DIR/src" "$VENV_DIR/bin/python" -m compileall -q "$PROJECT_DIR/src"
-    PYTHONPATH="$PROJECT_DIR/src" "$VENV_DIR/bin/python" -m unittest discover -s "$PROJECT_DIR/tests" -v
+    PYTHONPATH="$PROJECT_DIR/src:$PROJECT_DIR" "$VENV_DIR/bin/python" -m compileall -q "$PROJECT_DIR/src"
+    PYTHONPATH="$PROJECT_DIR/src:$PROJECT_DIR" "$VENV_DIR/bin/python" -m unittest discover -s "$PROJECT_DIR/tests" -v
 
     chown -R "root:$SERVICE_GROUP" "$VENV_DIR"
     chmod -R u=rwX,g=rX,o= "$VENV_DIR"
