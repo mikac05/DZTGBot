@@ -53,6 +53,5 @@ Treat `DZTGBot continue` case-insensitively as authorization to fast-forward thi
 - Preserve placeholder prompts and Jira rules until the user supplies approved replacements.
 - Treat `src/ref/vpnsettings.xml` as private input. Do not quote or summarize secret values.
 - Keep VPN operations L2TP/IPsec through NetworkManager; WireGuard is incompatible with the supplied server setup.
-- The deployment helper may support Ubuntu 22.04 and Oracle Linux 9, but the actual target must be detected or confirmed before deployment.
+- Ubuntu 22.04 is the only supported deployment target. The installer must refuse every other distribution or release.
 - Do not claim live Telegram, Gemini, VPN, systemd, or server validation unless it was actually performed in that environment.
-

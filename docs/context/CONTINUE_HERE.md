@@ -2,7 +2,9 @@
 
 ## Current status
 
-The bot implementation, offline tests, deployment script, systemd unit, VPN compatibility template, test plan, and cross-agent handoff workflow are present. No real credential or private VPN value has been added. No Jira connection exists.
+The bot implementation, offline tests, Ubuntu 22.04-only deployment script, systemd unit, VPN compatibility template, test plan, and cross-agent handoff workflow are present. No real credential or private VPN value has been added. No Jira connection exists.
+
+Ubuntu 22.04 is settled as the only target. All alternate platform branches, package logic, flags, and documentation were removed and must not be restored without a new explicit requirement.
 
 The first safe handoff commit exists locally. Its push is blocked because the currently authenticated Git identity lacks write permission to the configured `origin`. No remote URL or history was changed.
 
@@ -20,7 +22,7 @@ For deployment, the next concrete operation is to run `scripts/deploy.sh` on the
 
 ## Inputs still required from the user or target environment
 
-- Detect or confirm whether the actual target is Ubuntu 22.04 or Oracle Linux 9.
+- Confirm the target reports Ubuntu 22.04; every other distribution or release is out of scope.
 - Choose the target checkout location, non-root service account, and protected environment-file location.
 - Privately enter the real Telegram token, Gemini key, supported Gemini model, and numeric Telegram admin IDs.
 - Supply approved Gemini prompts and Jira task rules; tracked versions intentionally remain placeholders.
@@ -40,5 +42,5 @@ For deployment, the next concrete operation is to run `scripts/deploy.sh` on the
 1. Confirm the handoff commit is the checked-out `HEAD` and the worktree state is understood.
 2. Run the offline tests before deployment changes.
 3. Confirm ignored secret paths remain ignored.
-4. On the target host, let the installer detect the OS; do not assume from old chat history.
+4. On the target host, confirm the installer detects Ubuntu 22.04 and refuses any other platform.
 5. Follow `docs/end-to-end-test-plan.md` after systemd reports the service active.

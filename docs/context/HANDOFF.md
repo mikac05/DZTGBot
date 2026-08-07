@@ -10,7 +10,8 @@ Make the production-oriented Telegram bot and its complete project state portabl
 - Added strict async Gemini-to-Jira-template analysis and human-readable previews.
 - Added runtime Jira rules with admin-only hot updates and last-known-good fallback.
 - Added NetworkManager L2TP/IPsec status/start support matching the supplied profile constraints.
-- Added a hardened systemd service and a rerunnable Ubuntu/Oracle deployment script.
+- Added a hardened systemd service and a rerunnable Ubuntu 22.04-only deployment script.
+- Removed every alternate-distribution installer branch, package path, flag, and documentation reference; Ubuntu 22.04 is now enforced throughout the project.
 - Added offline tests, end-to-end server test guidance, secret exclusions, and placeholder-only configuration.
 - Added repository-native cross-agent instructions, context documents, Codex skill metadata, Antigravity rules/workflows, and safe Git synchronization tooling.
 
@@ -21,11 +22,11 @@ Make the production-oriented Telegram bot and its complete project state portabl
 - `DZTGBot continue` may fetch and fast-forward only when the checkout is clean.
 - The sync helper refuses known secret files/patterns, non-fast-forward situations, and destructive recovery.
 - The native Antigravity equivalents are `/dztgbot-handoff` and `/dztgbot-continue`.
+- Ubuntu 22.04 is the only supported deployment target; all other platforms are explicitly out of scope.
 
 ## Open items
 
 - The initial handoff is committed locally, but the currently authenticated Git identity does not have write permission to the configured `origin`; the remote was not changed.
-- The actual target distribution must be detected or confirmed because earlier planning mentioned both Ubuntu 22.04 and Oracle Linux 9.
 - Real Telegram/Gemini credentials and admin IDs have not been supplied and must remain outside Git.
 - Gemini prompts and Jira rules are intentionally placeholders pending approval.
 - The private VPN profile still must be installed and tested on the target host if VPN access is required.
@@ -44,6 +45,7 @@ Grant the current Git identity write permission to the configured origin, or exp
 - Handoff context, ignore policy, and credential-pattern validation passed.
 - A dirty-checkout `continue` test refused to pull and preserved the working tree unchanged.
 - The initial commit succeeded locally; the push was safely retained as a blocker after GitHub denied write permission.
+- An unsupported-platform reference audit passed; tracked project content now describes Ubuntu 22.04 only.
 
 ## Transfer limitations
 
@@ -52,10 +54,10 @@ Git does not transfer `.env`, private VPN files, tokens, keys, server access, Te
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-07T01:56:02Z`
+- Generated UTC: `2026-08-07T02:11:37Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `6209fca2081a`
-- Working-tree entries before metadata refresh: `3`
+- Base commit before this handoff: `226d8143b83f`
+- Working-tree entries before metadata refresh: `7`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->

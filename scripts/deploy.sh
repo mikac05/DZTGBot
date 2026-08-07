@@ -124,9 +124,8 @@ detect_platform() {
     readonly PLATFORM_VERSION="${VERSION_ID:-}"
 
     case "${PLATFORM_ID}:${PLATFORM_VERSION}" in
-        ubuntu:22.04*) readonly PLATFORM_FAMILY="ubuntu22" ;;
-        ol:9*|oracle:9*) readonly PLATFORM_FAMILY="oracle9" ;;
-        *) die "Supported targets are Ubuntu 22.04 and Oracle Linux 9; detected ${PLATFORM_ID:-unknown} ${PLATFORM_VERSION:-unknown}." ;;
+        ubuntu:22.04*) ;;
+        *) die "The only supported target is Ubuntu 22.04; detected ${PLATFORM_ID:-unknown} ${PLATFORM_VERSION:-unknown}." ;;
     esac
 }
 
@@ -220,40 +219,15 @@ validate_environment() {
     fi
 }
 
-validate_platform_options() {
-    [[ "$PLATFORM_FAMILY" == "oracle9" ]] || return
-
-    if [[ "$DZTGBOT_INSTALL_SYSTEM_PACKAGES" == "true" && -z "${DZTGBOT_PYTHON_BIN:-}" ]]; then
-        if [[ ! "$PLATFORM_VERSION" =~ ^9\.([0-9]+) || "${BASH_REMATCH[1]}" -lt 4 ]]; then
-            die "Oracle Linux 9.4 or later is required for the AppStream Python 3.12 packages. Supply an approved DZTGBOT_PYTHON_BIN on earlier Oracle Linux 9 releases."
-        fi
-    fi
-
-    if [[ "$VPN_ENABLED" == "true" && "$DZTGBOT_INSTALL_SYSTEM_PACKAGES" == "true" && "$DZTGBOT_ALLOW_ORACLE_DEVELOPER_EPEL" != "true" ]]; then
-        die "Oracle Linux L2TP packages require ol9_developer_EPEL. Review that repository and rerun with DZTGBOT_ALLOW_ORACLE_DEVELOPER_EPEL=true to approve enabling it."
-    fi
-}
-
 install_base_packages() {
     if [[ "${DZTGBOT_INSTALL_SYSTEM_PACKAGES:-true}" != "true" ]]; then
         log "Skipping operating-system package installation by request."
         return
     fi
 
-    case "$PLATFORM_FAMILY" in
-        ubuntu22)
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y ca-certificates sudo
-            ;;
-        oracle9)
-            local oracle_packages=(ca-certificates sudo)
-            if [[ -z "${DZTGBOT_PYTHON_BIN:-}" ]]; then
-                oracle_packages+=(python3.12 python3.12-pip python3.12-setuptools python3.12-wheel)
-            fi
-            dnf install -y "${oracle_packages[@]}"
-            ;;
-    esac
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y ca-certificates sudo
 }
 
 install_vpn_packages() {
@@ -266,20 +240,11 @@ install_vpn_packages() {
             xl2tpd_was_active="true"
         fi
 
-        case "$PLATFORM_FAMILY" in
-            ubuntu22)
-                export DEBIAN_FRONTEND=noninteractive
-                apt-get install -y software-properties-common
-                add-apt-repository -y universe
-                apt-get update
-                apt-get install -y network-manager network-manager-l2tp strongswan ppp xl2tpd sudo
-                ;;
-            oracle9)
-                dnf install -y oracle-epel-release-el9
-                dnf config-manager --set-enable ol9_developer_EPEL
-                dnf install -y NetworkManager NetworkManager-l2tp NetworkManager-ppp libreswan ppp xl2tpd sudo
-                ;;
-        esac
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -y software-properties-common
+        add-apt-repository -y universe
+        apt-get update
+        apt-get install -y network-manager network-manager-l2tp strongswan ppp xl2tpd sudo
 
         if [[ "$xl2tpd_was_active" == "false" ]] && systemctl is-active --quiet xl2tpd.service; then
             systemctl disable --now xl2tpd.service
@@ -437,7 +402,6 @@ main() {
     [[ "$DZTGBOT_SERVICE_USER" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "DZTGBOT_SERVICE_USER has an invalid system-account name."
     [[ -n "${DZTGBOT_ENV_FILE:-}" ]] || die "Set DZTGBOT_ENV_FILE to the protected absolute environment-file path."
     DZTGBOT_INSTALL_SYSTEM_PACKAGES="$(normalize_bool "${DZTGBOT_INSTALL_SYSTEM_PACKAGES:-true}")" || die "DZTGBOT_INSTALL_SYSTEM_PACKAGES must be true or false."
-    DZTGBOT_ALLOW_ORACLE_DEVELOPER_EPEL="$(normalize_bool "${DZTGBOT_ALLOW_ORACLE_DEVELOPER_EPEL:-false}")" || die "DZTGBOT_ALLOW_ORACLE_DEVELOPER_EPEL must be true or false."
     export DZTGBOT_INSTALL_SYSTEM_PACKAGES
 
     local script_directory
@@ -450,7 +414,6 @@ main() {
     log "Detected supported target: ${PLATFORM_ID} ${PLATFORM_VERSION}."
     prepare_environment_file
     validate_environment
-    validate_platform_options
     install_base_packages
     ensure_service_account
     build_virtual_environment

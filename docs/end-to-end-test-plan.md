@@ -1,6 +1,6 @@
 # End-to-end server test plan and admin command reference
 
-This plan supports Ubuntu 22.04 and Oracle Linux 9 (with the Python 3.12 conditions documented in the README) and contains no usable credentials, VPN endpoints, or Jira configuration.
+This plan supports Ubuntu 22.04 only and contains no usable credentials, VPN endpoints, or Jira configuration.
 
 ## 1. Test boundaries
 

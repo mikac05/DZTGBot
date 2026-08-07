@@ -15,7 +15,7 @@ Jira connectivity and issue creation are deliberately absent. A future Jira phas
 - `src/dztgbot/vpn.py`: read-only status and optional narrowly authorized start for one NetworkManager L2TP/IPsec connection.
 - `src/dztgbot/config.py`: environment-only configuration validation.
 - `src/dztgbot/__main__.py`: fully async polling lifecycle and privacy-safe error logging.
-- `scripts/deploy.sh`: rerunnable Ubuntu 22.04 / Oracle Linux 9 deployment gate.
+- `scripts/deploy.sh`: rerunnable Ubuntu 22.04-only deployment gate.
 - `deploy/systemd/dztgbot.service`: non-root, journald-backed, hardened long-running service template.
 - `tests/test_bot.py`: offline behavioral and safety tests.
 - `scripts/handoff.py`: cross-account/device context validation and safe Git synchronization.
@@ -35,10 +35,8 @@ Jira connectivity and issue creation are deliberately absent. A future Jira phas
 
 ## Deployment facts
 
-- The installer detects Ubuntu 22.04 and Oracle Linux 9 and refuses unknown targets.
+- The installer accepts Ubuntu 22.04 only and refuses every other distribution or release.
 - Ubuntu requires an approved Python 3.12 interpreter path when `python3.12` is not already available.
-- Oracle Linux can install AppStream Python 3.12 on 9.4 or later. Earlier Oracle Linux 9 releases require an approved interpreter path.
-- Oracle Linux L2TP package installation requires explicit approval to enable `ol9_developer_EPEL`.
 - The installer never enables NetworkManager or starts the full-tunnel VPN automatically.
 - The protected environment file and VPN profile must stay outside the checkout, root-owned, and mode `0600`.
 
@@ -60,7 +58,7 @@ These names may be documented, but their values must never be written to tracked
 - Offline tests and syntax checks verify local behavior only.
 - Real Telegram/Gemini tests require privately supplied credentials.
 - VPN compatibility requires a console-supervised test on the target host.
-- systemd hardening and package installation require validation on the detected target distribution.
+- systemd hardening and package installation require validation on the Ubuntu 22.04 target.
 - No live target-server deployment has been completed in this repository history yet.
 
 ## Durable context model
@@ -70,4 +68,3 @@ These names may be documented, but their values must never be written to tracked
 - `HANDOFF.md`: concise snapshot refreshed before switching.
 - `AGENTS.md`: command and safety contract.
 - `.agents/`: portable Codex/Antigravity skill, rule, and slash workflows.
-
