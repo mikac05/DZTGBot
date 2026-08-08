@@ -83,4 +83,4 @@ These names may be documented, but their values must never be written to tracked
 - `docs/operations/workflow-db-runbook.md`: target DB operations and recovery.
 - `docs/security/credential-threat-model.md`: selected credential boundary and encryption deferral.
 - `docs/reviews/*verification.md`: aligned Phase 9 architecture, performance/recovery, and security evidence.
-- `docs/reviews/telegram-bot-end-to-end-review-2026-08-07.md`: original audit whose findings are mapped in current documentation and tests.
+- `docs/operations/end-to-end-test-plan.md`: supervised target deployment & E2E validation sequence.

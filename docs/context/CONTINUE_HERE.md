@@ -38,7 +38,7 @@ Implemented and offline-verified:
 
 ## Exact next action
 
-Keep the service pilot-only. On an approved Ubuntu 24.04 target, perform the supervised validation sequence in `docs/end-to-end-test-plan.md` and `docs/operations/workflow-db-runbook.md`, beginning with ShellCheck/CI and deployment preflight before any Telegram, Gemini, Jira, VPN, or systemd action.
+Keep the service pilot-only. On an approved Ubuntu 24.04 target, perform the supervised validation sequence in `docs/operations/end-to-end-test-plan.md` and `docs/operations/workflow-db-runbook.md`, beginning with ShellCheck/CI and deployment preflight before any Telegram, Gemini, Jira, VPN, or systemd action.
 
 ## Inputs still required from the user or target environment
 

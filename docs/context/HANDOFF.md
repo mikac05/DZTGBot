@@ -40,7 +40,7 @@ Success for the completed program includes clean domain isolation, explicit FSM 
 
 ## Exact next action
 
-Keep the service pilot-only. With explicit target-environment authorization, execute the supervised sequence in `docs/end-to-end-test-plan.md` and `docs/operations/workflow-db-runbook.md`, beginning with Ubuntu 24.04 CI/ShellCheck and deployment preflight before external API or VPN actions.
+Keep the service pilot-only. With explicit target-environment authorization, execute the supervised sequence in `docs/operations/end-to-end-test-plan.md` and `docs/operations/workflow-db-runbook.md`, beginning with Ubuntu 24.04 CI/ShellCheck and deployment preflight before external API or VPN actions.
 
 ## Verification
 
@@ -54,10 +54,10 @@ Keep the service pilot-only. With explicit target-environment authorization, exe
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-08T16:29:16Z`
+- Generated UTC: `2026-08-08T16:32:07Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `0bc0d2797166`
-- Working-tree entries before metadata refresh: `8`
+- Base commit before this handoff: `41f89d7c8187`
+- Working-tree entries before metadata refresh: `5`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->
