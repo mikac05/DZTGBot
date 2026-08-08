@@ -10,7 +10,13 @@ from __future__ import annotations
 import html
 from typing import Mapping, Sequence
 
-from dztgbot.domain.models import Draft, PublishedIssue, JiraTaskTemplate
+from dztgbot.domain.models import (
+    Draft,
+    JiraIssueView,
+    JiraSearchResult,
+    JiraTaskTemplate,
+    PublishedIssue,
+)
 
 
 TELEGRAM_MESSAGE_LIMIT = 4096
@@ -173,3 +179,141 @@ def render_safe_feedback(message: str) -> str:
 def render_private_only_warning() -> str:
     """Render a private chat enforcement warning."""
     return "⚠️ <b>安全提示:</b> 此機器人僅限私訊（Private Chat）使用。"
+
+
+def render_issue_card(issue: JiraIssueView, header_title: str | None = None) -> str:
+    """Render the universal atomic Jira issue card in HTML format."""
+    status_bullet = "●"
+    flagged_tag = " · <b>Flagged</b>" if issue.is_flagged else ""
+    blocker_str = (
+        f"\n⚠️ <b>Blocked by {html_escape(', '.join(issue.blocker_keys))}</b>{flagged_tag}"
+        if issue.blocker_keys
+        else ("\n⚠️ <b>Flagged (Impediment)</b>" if issue.is_flagged else "")
+    )
+
+    assignee_str = html_escape(issue.assignee) if issue.assignee else "<i>Unassigned</i>"
+    reporter_str = html_escape(issue.reporter) if issue.reporter else "<i>Unknown</i>"
+
+    context_line = []
+    if issue.epic_key:
+        context_line.append(f"Epic: {html_escape(issue.epic_key)}")
+    if issue.sprint_name:
+        context_line.append(f"Sprint: {html_escape(issue.sprint_name)}")
+    context_str = f"\n{' | '.join(context_line)}" if context_line else ""
+
+    last_comment = (
+        f"\n💬 <i>{html_escape(issue.last_comment_summary)}</i>"
+        if issue.last_comment_summary
+        else ""
+    )
+
+    header = f"<b>{html_escape(header_title)}</b>\n" if header_title else ""
+    card_html = (
+        f"{header}"
+        f"<b><a href=\"{html_escape(issue.issue_url)}\">{html_escape(issue.issue_key)}</a></b>  {status_bullet}  <b>{html_escape(issue.status)}</b>  {status_bullet}  <b>{html_escape(issue.priority)}</b>\n"
+        f"<b>{html_escape(issue.summary)}</b>\n"
+        f"Assignee: {assignee_str} | Reporter: {reporter_str}"
+        f"{context_str}"
+        f"{blocker_str}"
+        f"{last_comment}"
+    )
+    return card_html
+
+
+def render_search_results(result: JiraSearchResult, title: str) -> str:
+    """Render a header for JQL search results."""
+    count = len(result.issues)
+    if count == 0:
+        return f"🔍 <b>{html_escape(title)}</b>\n\n<i>No open issues found matching query.</i>"
+    return f"🔍 <b>{html_escape(title)}</b> (Found {result.total} open issues, showing {count}):"
+
+
+def render_compact_search_list(
+    result: JiraSearchResult, title: str, page: int = 1, per_page: int = 5
+) -> str:
+    """Render a compact search result list (Key + Summary) with page header."""
+    total_issues = len(result.issues)
+    if total_issues == 0:
+        return f"🔍 <b>{html_escape(title)}</b>\n\n<i>未找到符合條件的未解決工單。</i>"
+
+    total_pages = max(1, (total_issues + per_page - 1) // per_page)
+    current_page = max(1, min(page, total_pages))
+
+    start_idx = (current_page - 1) * per_page
+    end_idx = min(start_idx + per_page, total_issues)
+    page_issues = result.issues[start_idx:end_idx]
+
+    lines = [
+        f"🔍 <b>{html_escape(title)}</b> (共 {result.total} 筆，第 {current_page}/{total_pages} 頁):\n"
+    ]
+    for idx, issue in enumerate(page_issues, start=start_idx + 1):
+        summary_short = truncate_text(issue.summary, 45)
+        lines.append(
+            f"{idx}. <b><a href=\"{html_escape(issue.issue_url)}\">{html_escape(issue.issue_key)}</a></b>: {html_escape(summary_short)}"
+        )
+
+    lines.append("\n<i>點擊下方數字按鈕查看工單詳細卡片與操作介面:</i>")
+    return "\n".join(lines)
+
+
+def render_standup_report(
+    blocked: Sequence[JiraIssueView],
+    in_progress: Sequence[JiraIssueView],
+    in_qa: Sequence[JiraIssueView],
+    done: Sequence[JiraIssueView],
+) -> str:
+    """Render an executive daily standup summary report."""
+    lines = ["📊 <b>每日團隊站會摘要 (Daily Standup Summary)</b>\n"]
+
+    # Section 1: Blocked
+    lines.append(f"🔴 <b>阻礙中 (Blocked - {len(blocked)} 筆):</b>")
+    if blocked:
+        for issue in blocked:
+            lines.append(
+                f"• <b><a href=\"{html_escape(issue.issue_url)}\">{html_escape(issue.issue_key)}</a></b>: "
+                f"{html_escape(truncate_text(issue.summary, 40))} ({html_escape(issue.assignee or 'Unassigned')})"
+            )
+    else:
+        lines.append("<i>無阻礙項目</i>")
+
+    lines.append("")
+
+    # Section 2: In Progress
+    lines.append(f"🔵 <b>進行中 (In Progress - {len(in_progress)} 筆):</b>")
+    if in_progress:
+        for issue in in_progress[:5]:
+            lines.append(
+                f"• <b><a href=\"{html_escape(issue.issue_url)}\">{html_escape(issue.issue_key)}</a></b>: "
+                f"{html_escape(truncate_text(issue.summary, 40))} ({html_escape(issue.assignee or 'Unassigned')})"
+            )
+    else:
+        lines.append("<i>無進行中項目</i>")
+
+    lines.append("")
+
+    # Section 3: In QA / Review
+    lines.append(f"🟡 <b>待測試 (In QA / Review - {len(in_qa)} 筆):</b>")
+    if in_qa:
+        for issue in in_qa[:5]:
+            lines.append(
+                f"• <b><a href=\"{html_escape(issue.issue_url)}\">{html_escape(issue.issue_key)}</a></b>: "
+                f"{html_escape(truncate_text(issue.summary, 40))} ({html_escape(issue.assignee or 'Unassigned')})"
+            )
+    else:
+        lines.append("<i>無待測項目</i>")
+
+    lines.append("")
+
+    # Section 4: Done
+    lines.append(f"🟢 <b>本週已完成 (Done - {len(done)} 筆):</b>")
+    if done:
+        for issue in done[:5]:
+            lines.append(
+                f"• <b><a href=\"{html_escape(issue.issue_url)}\">{html_escape(issue.issue_key)}</a></b>: "
+                f"{html_escape(truncate_text(issue.summary, 40))}"
+            )
+    else:
+        lines.append("<i>無完成項目</i>")
+
+    return "\n".join(lines)
+

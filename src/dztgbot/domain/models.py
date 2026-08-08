@@ -165,3 +165,51 @@ class Draft:
             created_at=now,
             updated_at=now,
         )
+
+
+@dataclass(frozen=True)
+class JiraTransitionView:
+    """Canonical domain view of an available Jira issue transition."""
+    transition_id: str
+    name: str
+    to_status: str
+    has_screen: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.transition_id or not self.name or not self.to_status:
+            raise ValueError("transition_id, name, and to_status must not be empty")
+
+
+@dataclass(frozen=True)
+class JiraIssueView:
+    """Canonical domain view of a live Jira issue for triage and rendering."""
+    issue_key: str
+    issue_id: str
+    summary: str
+    status: str
+    priority: str
+    assignee: str = ""
+    reporter: str = ""
+    epic_key: str = ""
+    epic_name: str = ""
+    sprint_name: str = ""
+    is_flagged: bool = False
+    blocker_keys: tuple[str, ...] = ()
+    description: str = ""
+    issue_url: str = ""
+    last_comment_summary: str = ""
+    updated_at: str = ""
+    is_watching: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.issue_key or not self.issue_id:
+            raise ValueError("issue_key and issue_id must not be empty")
+
+
+@dataclass(frozen=True)
+class JiraSearchResult:
+    """Result container for JQL search operations."""
+    total: int
+    issues: tuple[JiraIssueView, ...]
+    jql: str
+

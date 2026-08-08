@@ -44,7 +44,11 @@ from .services import (
 )
 from .services.limits import ResourceKind, ResourceLimitSpec, ResourceLimiter
 from .services.observability import SafeMetrics
+from .services.jira_issue_service import JiraIssueService
+from .services.card_tracker_service import CardTrackerService
 from .ui.handlers import build_production_ui_handlers
+from .ui.handlers.search import SearchHandlers
+from .ui.handlers.actions import ActionHandlers
 from .ui.keyboards import build_draft_inline_keyboard, get_draft_reply_keyboard
 from .ui.rendering import render_draft_card
 from .user_store import UserStore
@@ -287,6 +291,12 @@ async def run() -> None:
                     [
                         BotCommand("start", "開始使用 / 查看說明"),
                         BotCommand("new", "📝 手動建立 Jira 工單"),
+                        BotCommand("my", "📋 我的待辦工單 (My Open)"),
+                        BotCommand("created", "🚩 我回報的工單 (I Created)"),
+                        BotCommand("unassigned", "📥 未指派工單 (Unassigned)"),
+                        BotCommand("blocked", "⚠️ 被阻礙的工單 (Blocked)"),
+                        BotCommand("sprint", "🏃 當前 Sprint 工單"),
+                        BotCommand("s", "🔍 關鍵字搜尋 Jira 工單"),
                         BotCommand("auth", "🔑 綁定 Jira 帳號"),
                         BotCommand("logout", "🚪 解綁 Jira 帳號"),
                         BotCommand("help", "📖 查看使用說明"),
@@ -355,6 +365,12 @@ async def run() -> None:
             on_draft_ready=on_draft_ready_handler,
         )
 
+        jira_issue_service = JiraIssueService(jira_gateway, user_store)
+        card_tracker_service = CardTrackerService(workflow_repo)
+
+        search_handlers = SearchHandlers(jira_issue_service, card_tracker_service)
+        action_handlers = ActionHandlers(jira_issue_service, card_tracker_service, workflow_service)
+
         # Legacy auth/admin handlers compatibility facade
         legacy_jira_client = JiraClient(
             base_url=settings.jira_url,
@@ -367,8 +383,12 @@ async def run() -> None:
             settings.jira_url,
             allowed_user_ids=settings.telegram_allowed_user_ids,
         )
-        from telegram.ext import MessageHandler, filters
-        logout_btn = MessageHandler(filters.Regex(r"^(🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_h.callback)
+        from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, InlineQueryHandler, filters
+        logout_btn = MessageHandler(filters.Regex(r"^(🚪 Logout|🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_h.callback)
+        auth_btn = MessageHandler(filters.Regex(r"^(🔑 連結 Jira|🔑 綁定 Jira 帳號|🔑 绑定 Jira 账号)$"), auth_conv.entry_points[0].callback)
+        my_btn = MessageHandler(filters.Regex(r"^(📋 指派給我的)$"), search_handlers.handle_my_open)
+        created_btn = MessageHandler(filters.Regex(r"^(🚩 我建的)$"), search_handlers.handle_created)
+        search_prompt_btn = MessageHandler(filters.Regex(r"^(🔍 搜尋)$"), search_handlers.handle_search_prompt)
         help_btn = MessageHandler(filters.Regex(r"^(📖 說明|📖 说明)$"), help_h.callback)
 
         admin_handlers = build_admin_handlers(
@@ -388,14 +408,44 @@ async def run() -> None:
             allowed_user_ids=settings.telegram_allowed_user_ids,
         )
 
+        search_cmd_handlers = [
+            CommandHandler("my", search_handlers.handle_my_open),
+            CommandHandler("created", search_handlers.handle_created),
+            CommandHandler("unassigned", search_handlers.handle_unassigned),
+            CommandHandler("blocked", search_handlers.handle_blocked),
+            CommandHandler("sprint", search_handlers.handle_sprint),
+            CommandHandler("standup", search_handlers.handle_standup_report),
+            CommandHandler("s", search_handlers.handle_keyword_search),
+            CallbackQueryHandler(search_handlers.handle_filter_callback, pattern=r"^flt:"),
+            CallbackQueryHandler(search_handlers.handle_show_card_callback, pattern=r"^shc:"),
+            CallbackQueryHandler(search_handlers.handle_page_callback, pattern=r"^pg:"),
+            InlineQueryHandler(search_handlers.handle_inline_query),
+            MessageHandler(filters.TEXT & filters.Entity("url"), search_handlers.handle_url_unfurl),
+        ]
+
+        action_event_handlers = [
+            CallbackQueryHandler(action_handlers.handle_card_action_callback, pattern=r"^card_"),
+            CallbackQueryHandler(action_handlers.handle_execute_move, pattern=r"^do_mv:"),
+            CallbackQueryHandler(action_handlers.handle_execute_assign, pattern=r"^do_asn:"),
+            CallbackQueryHandler(action_handlers.handle_execute_unblock, pattern=r"^do_ubk:"),
+            MessageHandler(filters.REPLY & (filters.TEXT | filters.PHOTO), action_handlers.handle_reply_comment_or_attachment),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, action_handlers.handle_block_input_message),
+        ]
+
         application.add_handlers([
             auth_conv,
+            auth_btn,
             start_h,
             logout_h,
             logout_btn,
+            my_btn,
+            created_btn,
+            search_prompt_btn,
             help_h,
             help_btn,
             *admin_handlers,
+            *search_cmd_handlers,
+            *action_event_handlers,
             *ui_handlers,
         ])
 

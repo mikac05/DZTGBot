@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
+import re
 from typing import Mapping, Protocol, Sequence
 import uuid
 
@@ -25,6 +27,8 @@ from dztgbot.domain.errors import (
 )
 from dztgbot.domain.fsm import DraftState
 from dztgbot.domain.models import Draft, JiraTaskTemplate, PublishedIssue, SubmissionAttempt
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SubmissionRepository(Protocol):
@@ -125,6 +129,18 @@ class SubmissionService:
             issue = await self._gateway.create_issue(
                 draft.template, pat, idempotency_key=attempt.request_hash
             )
+            # Check for Target PROD Key in description and auto-link
+            if draft.template and "Target PROD Key:" in draft.template.description:
+                match = re.search(r"Target PROD Key:\s*([A-Z0-9]+-\d+)", draft.template.description)
+                if match:
+                    prod_key = match.group(1).upper()
+                    try:
+                        if hasattr(self._gateway, "create_generic_issue_link"):
+                            await self._gateway.create_generic_issue_link(
+                                pat, issue.issue_key, prod_key, "Relates"
+                            )
+                    except Exception as link_err:
+                        LOGGER.warning("Auto-linking %s to %s failed: %s", issue.issue_key, prod_key, link_err)
         except DomainError as error:
             return await self._finish_failure(submitting, attempt, error)
         except Exception as error:

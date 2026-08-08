@@ -9,10 +9,11 @@ presentation await occurs.
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-import logging
 
 from dztgbot.domain.errors import DomainError
 from dztgbot.domain.fsm import DraftState
@@ -420,6 +421,18 @@ class IntakeService:
                 rules_text,
                 self._default_project_key,
             )
+            # Detect PROD issue key in source messages
+            prod_key = None
+            for msg in analyzing.source_messages:
+                match = re.search(r"\b(PROD-\d+)\b", msg.text, re.IGNORECASE)
+                if match:
+                    prod_key = match.group(1).upper()
+                    break
+
+            if prod_key and template:
+                desc = template.description + f"\n\nTarget PROD Key: {prod_key}"
+                proj = self._default_project_key if self._default_project_key.upper() != "PROD" else "BOT"
+                template = replace(template, project_key=proj, description=desc)
         except Exception as error:
             LOGGER.warning("Intake analysis failed (%s)", type(error).__name__)
             return await self._mark_analysis_failed(analyzing)

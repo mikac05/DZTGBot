@@ -44,7 +44,7 @@ from ...domain.models import (
 )
 
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 4
 DEFAULT_BUSY_TIMEOUT_SECONDS = 5.0
 MAX_BUSY_TIMEOUT_SECONDS = 30.0
 DEFAULT_BATCH_LIMIT = 100
@@ -52,6 +52,8 @@ DEFAULT_BATCH_LIMIT = 100
 _MIGRATIONS = (
     (1, "001_initial.sql"),
     (2, "002_indexes.sql"),
+    (3, "003_card_tracker.sql"),
+    (4, "004_notifications.sql"),
 )
 
 _SYNCED_PATH_MARKERS = frozenset(
@@ -1570,3 +1572,90 @@ class SQLiteWorkflowRepository:
             )
         finally:
             connection.close()
+
+    async def register_card_message(
+        self, chat_id: int, message_id: int, issue_key: str, owner_id: int
+    ) -> None:
+        await self._run(
+            self._register_card_message_sync, chat_id, message_id, issue_key, owner_id
+        )
+
+    def _register_card_message_sync(
+        self, chat_id: int, message_id: int, issue_key: str, owner_id: int
+    ) -> None:
+        connection = self._connect()
+        self._begin(connection)
+        try:
+            now_str = _to_db_datetime(datetime.now(timezone.utc))
+            connection.execute(
+                """
+                INSERT INTO card_message_tracker(chat_id, message_id, issue_key, owner_id, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(chat_id, message_id) DO UPDATE SET
+                    issue_key=excluded.issue_key,
+                    owner_id=excluded.owner_id,
+                    updated_at=excluded.updated_at
+                """,
+                (chat_id, message_id, issue_key, owner_id, now_str),
+            )
+            connection.commit()
+        except Exception:
+            self._rollback(connection)
+            raise
+        finally:
+            connection.close()
+
+    async def get_card_messages_for_issue(
+        self, issue_key: str
+    ) -> tuple[tuple[int, int, int], ...]:
+        return await self._run(self._get_card_messages_for_issue_sync, issue_key)
+
+    def _get_card_messages_for_issue_sync(
+        self, issue_key: str
+    ) -> tuple[tuple[int, int, int], ...]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                "SELECT chat_id, message_id, owner_id FROM card_message_tracker WHERE issue_key=? ORDER BY updated_at DESC",
+                (issue_key,),
+            ).fetchall()
+            return tuple((int(r["chat_id"]), int(r["message_id"]), int(r["owner_id"])) for r in rows)
+        finally:
+            connection.close()
+
+    async def get_last_notified_update(self, user_id: int, issue_key: str) -> str | None:
+        return await self._run(self._get_last_notified_update_sync, user_id, issue_key)
+
+    def _get_last_notified_update_sync(self, user_id: int, issue_key: str) -> str | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                "SELECT last_updated FROM user_notification_tracker WHERE user_id=? AND issue_key=?",
+                (user_id, issue_key),
+            ).fetchone()
+            return str(row["last_updated"]) if row is not None else None
+        finally:
+            connection.close()
+
+    async def record_notification(self, user_id: int, issue_key: str, last_updated: str) -> None:
+        await self._run(self._record_notification_sync, user_id, issue_key, last_updated)
+
+    def _record_notification_sync(self, user_id: int, issue_key: str, last_updated: str) -> None:
+        connection = self._connect()
+        self._begin(connection)
+        try:
+            connection.execute(
+                """
+                INSERT INTO user_notification_tracker(user_id, issue_key, last_updated)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id, issue_key) DO UPDATE SET last_updated=excluded.last_updated
+                """,
+                (user_id, issue_key, last_updated),
+            )
+            connection.commit()
+        except Exception:
+            self._rollback(connection)
+            raise
+        finally:
+            connection.close()
+

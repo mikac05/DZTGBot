@@ -150,20 +150,20 @@ class UserStoreTests(unittest.IsolatedAsyncioTestCase):
             store = UserStore(path)
             await store.initialize()
 
-            # Unauthenticated -> shows 🔑 綁定 Jira 帳號
+            # Unauthenticated -> shows 🔑 連結 Jira
             kbd_unauthed = await get_main_menu_keyboard(12345, store)
             buttons_unauthed = [btn.text for row in kbd_unauthed.keyboard for btn in row]
-            self.assertIn("🔑 綁定 Jira 帳號", buttons_unauthed)
-            self.assertNotIn("🚪 解綁 Jira 帳號", buttons_unauthed)
+            self.assertIn("🔑 連結 Jira", buttons_unauthed)
+            self.assertNotIn("🚪 Logout", buttons_unauthed)
             self.assertIn("📖 說明", buttons_unauthed)
 
-            # Authenticated -> shows 🚪 解綁 Jira 帳號
+            # Authenticated -> shows 🚪 Logout
             await store.store(12345, JiraCredentials("user", "User", "pat"))
             kbd_authed = await get_main_menu_keyboard(12345, store)
             buttons_authed = [btn.text for row in kbd_authed.keyboard for btn in row]
-            self.assertIn("🚪 解綁 Jira 帳號", buttons_authed)
-            self.assertNotIn("🔑 綁定 Jira 帳號", buttons_authed)
-            self.assertIn("📖 說明", buttons_authed)
+            self.assertIn("🚪 Logout", buttons_authed)
+            self.assertNotIn("🔑 連結 Jira", buttons_authed)
+            self.assertIn("📋 指派給我的", buttons_authed)
 
 
 class VpnTests(unittest.IsolatedAsyncioTestCase):

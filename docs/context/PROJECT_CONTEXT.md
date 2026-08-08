@@ -9,15 +9,15 @@ The first safe release is private-chat-only. Every Jira create or update require
 ## Current architecture
 
 - `src/dztgbot/domain/`: frozen domain entities, full `DraftState` FSM, typed error/certainty taxonomy, strict `j1:<action>:<opaque-token>` callback grammar, security policies, and provider-free ports.
-- `src/dztgbot/services/`: pure workflow, connectivity, intake, callback authorization, submission/reconciliation, attachment, resource-limit, and observability services.
-- `src/dztgbot/infrastructure/persistence/`: versioned SQLite WAL repository for drafts, callback hashes, attempts, attachments, published issues, expiry, and atomic current+1 revision CAS.
-- `src/dztgbot/infrastructure/jira_gateway.py`: one lifecycle-managed `httpx.AsyncClient`, request-local PAT headers, canonical payload/diff/hash mapping, bounded timeouts/errors, metadata caching, and no blind create retry.
+- `src/dztgbot/services/`: pure workflow, connectivity, intake, callback authorization, submission/reconciliation, attachment, resource-limit, card-tracker, unread notification poller, issue triage, and observability services.
+- `src/dztgbot/infrastructure/persistence/`: versioned SQLite WAL repository (schema v4) for drafts, callback hashes, attempts, attachments, published issues, card message tracker, unread notification tracker, expiry, and atomic current+1 revision CAS.
+- `src/dztgbot/infrastructure/jira_gateway.py`: one lifecycle-managed `httpx.AsyncClient`, request-local PAT headers, canonical payload/diff/hash mapping, dynamic workflow transitions, issue links (`Relates to`, `Impediment`), issue watchers, bounded timeouts/errors, metadata caching, and no blind create retry.
 - `src/dztgbot/infrastructure/gemini_gateway.py`: strict structured DTOs, prompt budgets, total deadlines, bounded fallback, rate-limit classification, and no unsupported media bytes.
 - `src/dztgbot/infrastructure/keyed_processor.py`: workflow/collection keyed serialization with bounded admission and validated concurrency-one fallback.
-- `src/dztgbot/ui/`: HTML-safe renderers, strict bound keyboards, and thin private handlers using parse -> service -> I/O -> service -> render.
-- `src/dztgbot/__main__.py`: sole composition root, PTB update processor, handler/command registration, resource-limit/metrics wiring, and deterministic reverse-order teardown.
+- `src/dztgbot/ui/`: HTML-safe renderers (Universal Cards, Compact Paginated Search, Standup Digest), auth-aware reply keyboards, action bar keyboards (`Move`, `Edit`, `Comment`, `Block`, `Assign`, `Watch`, `Sub-task`, `Figma Spec`), and thin private handlers using parse -> service -> I/O -> service -> render.
+- `src/dztgbot/__main__.py`: sole composition root, PTB update processor, auth-aware reply keyboards, `/standup` command, inline query, link unfurling, resource-limit/metrics wiring, and deterministic reverse-order teardown.
 - `src/dztgbot/user_store.py`: PAT-only copy-on-write credential storage with schema/size/regular-file validation, mode `0600`, corruption quarantine, and previous-copy recovery.
-- `src/dztgbot/jira_auth.py` and `admin.py`: three-minute PAT-only private auth, optional allowlist enforcement, honest local logout, and private numeric-ID-restricted administration.
+- `src/dztgbot/jira_auth.py` and `admin.py`: three-minute PAT-only private auth, optional allowlist enforcement, dynamic 3-row authenticated reply keyboard, honest local logout, and private numeric-ID-restricted administration.
 - `src/dztgbot/rules.py`: bounded signature-cached rules with atomic update and last-known-good recovery.
 - `src/dztgbot/core.py`, `analysis.py`, and `jira_client.py`: non-authoritative compatibility facades only; they own no workflow state.
 - `scripts/deploy.sh` and `deploy/systemd/dztgbot.service`: Ubuntu 24.04-only deployment, protected local workflow DB preflight/backup/migration, non-root runtime, root-owned secrets, and narrow optional VPN controls.
@@ -30,6 +30,13 @@ Dependency direction is `ui -> services -> domain`; infrastructure implements po
 - Use `python-telegram-bot` 22.8 async polling without a web server.
 - Use Jira PAT-only Bearer authentication. Passwords, Basic auth, and session cookies are rejected.
 - Keep authentication, workflows, callbacks, Jira mutations, and admin commands private-chat-only for the first release.
+- Dynamic auth-aware main reply keyboard (`[🔑 連結 Jira]` vs `[📋 指派給我的] [🚩 我建的] / [🔍 搜尋] [📝 新建] / [🚪 Logout]`).
+- Compact paginated JQL search results (5 items per page) with 1-tap card preview buttons (`[1. PROJ-123]`).
+- Universal Issue Card Action Bar: Dynamic Primary Transition (`[▶️ Start Dev]`), `[➡️ Move]`, `[📝 Edit]`, `[💬 Comment]`, `[⚠️ Block]`, `[👤 Assign]`, `[👁️ Watch]`, `[➕ Sub-task]`, `[Open in Jira ↗]`, and auto-detected `[🎨 Figma Spec ↗]`.
+- Direct Reply to Card for instant Jira comment & photo attachment uploads.
+- Auto-detect `PROD-xxx` keys on forward/input -> auto-target `BOT` project & execute `POST /issueLink` (`Relates to`).
+- Executive Standup Summary Report (`/standup`) grouping tickets into Blocked, In Progress, In QA/Review, and Recently Done.
+- Background Unread Notification Poller (`NotificationPollerService`) running every 300s (5 min) with SQLite schema v4 tracker.
 - Persist workflow state in a protected local SQLite WAL database outside Git, synchronized folders, and network filesystems.
 - Store callback token hashes only. Tokens contain at least 128 bits of cryptographic randomness and bind exact workflow authorization context.
 - Treat a dispatched Jira create/update with unknown outcome as reconciliation-required and never automatically retry it.
@@ -55,10 +62,12 @@ These names may be documented, but their values must never be written to tracked
 
 ## Evidence boundaries
 
-- Offline suite: 449 tests run; 448 passed and one Windows-only `O_NOFOLLOW` skip.
-- Ruff, strict mypy on 29 gated files, `pip check`, compilation, Git-Bash deploy syntax, and diff checks pass.
-- Focused branch coverage is 91% for FSM/callback/security and 77% for repository/submission.
+- Offline suite: **466 tests run; 465 passed and one Windows-only `O_NOFOLLOW` skip**.
+- Ruff, strict mypy for all source files, `pip check`, compilation, Git-Bash deploy syntax, and diff checks pass.
+- Focused branch coverage is >90% for FSM/callback/security and >77% for repository/submission.
 - Recovery/concurrency/resource matrix passed 132/132 repeated executions.
+- Real Telegram, Gemini, Jira, VPN, systemd, Ubuntu deployment, target DB operations, and server behavior remain unverified.
+- The service remains pilot-only pending supervised target-environment validation.
 - ShellCheck is configured in Ubuntu 24.04 CI but was unavailable locally.
 - Real Telegram, Gemini, Jira, VPN, systemd, Ubuntu deployment, target DB operations, and server behavior remain unverified.
 - The service remains pilot-only pending supervised target-environment validation.

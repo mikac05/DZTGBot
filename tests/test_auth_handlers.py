@@ -464,14 +464,14 @@ class LogoutAndStartPrivacyTests(AuthHandlerFixture):
     async def test_main_menu_keyboard_toggles(self) -> None:
         kbd = await get_main_menu_keyboard(1001, self.store)
         labels = [btn.text for row in kbd.keyboard for btn in row]
-        self.assertIn("🔑 綁定 Jira 帳號", labels)
+        self.assertIn("🔑 連結 Jira", labels)
         await self.store.store(
             1001,
             JiraCredentials("u", "U", TEST_ONLY_PAT),
         )
         kbd2 = await get_main_menu_keyboard(1001, self.store)
         labels2 = [btn.text for row in kbd2.keyboard for btn in row]
-        self.assertIn("🚪 解綁 Jira 帳號", labels2)
+        self.assertIn("🚪 Logout", labels2)
 
 
 class AllowedUserGateTests(unittest.IsolatedAsyncioTestCase):
@@ -647,7 +647,7 @@ class AllowedUserGateTests(unittest.IsolatedAsyncioTestCase):
         )
         await self.help_cmd(update, _context())
         body = message.reply_text.await_args.args[0]
-        self.assertIn("使用說明", body)
+        self.assertIn("使用指南", body)
         self.assertNotIn(TEST_ONLY_PAT, body)
 
     async def test_denied_user_help_is_rejected(self) -> None:

@@ -61,6 +61,19 @@ class CallbackAction(str, Enum):
     TOGGLE_PRIORITY = "tpri"
     RETRY = "rty"
     RECONCILE = "rcn"
+    MOVE_TRANSITION = "mv"
+    SELECT_TRANSITION = "smv"
+    QUICK_EDIT = "qed"
+    ADD_COMMENT = "cmt"
+    BLOCK_ISSUE = "blk"
+    UNBLOCK_ISSUE = "ubk"
+    ASSIGN_ISSUE = "asn"
+    ASSIGN_ME = "asme"
+    CREATE_SUBTASK = "sub"
+    QUICK_FILTER = "flt"
+    REFRESH_CARD = "rfh"
+    WATCH_ISSUE = "wtc"
+    UNWATCH_ISSUE = "uwtc"
 
     @classmethod
     def allowlist(cls) -> frozenset[str]:
@@ -75,6 +88,10 @@ ONE_SHOT_ACTIONS: frozenset[CallbackAction] = frozenset(
         CallbackAction.RETRY,
         CallbackAction.RECONCILE,
         CallbackAction.EDIT_PUBLISHED,
+        CallbackAction.SELECT_TRANSITION,
+        CallbackAction.BLOCK_ISSUE,
+        CallbackAction.UNBLOCK_ISSUE,
+        CallbackAction.ASSIGN_ME,
     }
 )
 

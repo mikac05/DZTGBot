@@ -28,7 +28,13 @@ from dztgbot.domain.errors import (
     classify_definite_mutation_failure,
     classify_unknown_mutation_outcome,
 )
-from dztgbot.domain.models import JiraTaskTemplate, PublishedIssue
+from dztgbot.domain.models import (
+    JiraIssueView,
+    JiraSearchResult,
+    JiraTaskTemplate,
+    JiraTransitionView,
+    PublishedIssue,
+)
 
 
 MAX_ERROR_BODY_BYTES = 16_384
@@ -306,6 +312,265 @@ class JiraGateway:
         if not all(isinstance(data[name], str) for name in ("id", "key")) or not isinstance(data["fields"], Mapping):
             raise self._contract_error(Operation.JIRA_UPDATE)
         return JiraRemoteIssue(data["key"], data["id"], dict(data["fields"]))
+
+    async def get_issue_details(self, issue_key: str, pat: str) -> JiraIssueView:
+        response = await self._safe_request(
+            "GET",
+            f"/issue/{quote(issue_key, safe='-')}",
+            pat,
+            Operation.JIRA_UPDATE,
+            params={"expand": "renderedFields,names"},
+        )
+        data = self._json_object(response, Operation.JIRA_UPDATE, required=("id", "key", "fields"))
+        return self._parse_issue_view(data)
+
+    async def search_jql(self, pat: str, jql: str, max_results: int = 7) -> JiraSearchResult:
+        response = await self._safe_request(
+            "GET",
+            "/search",
+            pat,
+            Operation.JIRA_UPDATE,
+            params={
+                "jql": jql,
+                "maxResults": min(max_results, 20),
+                "expand": "names",
+            },
+        )
+        data = self._json_object(response, Operation.JIRA_UPDATE, required=("issues",))
+        raw_issues = data.get("issues")
+        if not isinstance(raw_issues, list):
+            raise self._contract_error(Operation.JIRA_UPDATE)
+        total = int(data.get("total", len(raw_issues)))
+        parsed_issues: list[JiraIssueView] = []
+        for item in raw_issues:
+            if isinstance(item, Mapping) and "id" in item and "key" in item:
+                parsed_issues.append(self._parse_issue_view(item))
+        return JiraSearchResult(total=total, issues=tuple(parsed_issues), jql=jql)
+
+    async def get_transitions(self, issue_key: str, pat: str) -> tuple[JiraTransitionView, ...]:
+        response = await self._safe_request(
+            "GET",
+            f"/issue/{quote(issue_key, safe='-')}/transitions",
+            pat,
+            Operation.JIRA_UPDATE,
+        )
+        data = self._json_object(response, Operation.JIRA_UPDATE, required=("transitions",))
+        raw_transitions = data.get("transitions")
+        if not isinstance(raw_transitions, list):
+            raise self._contract_error(Operation.JIRA_UPDATE)
+        transitions: list[JiraTransitionView] = []
+        for item in raw_transitions:
+            if isinstance(item, Mapping):
+                t_id = str(item.get("id", ""))
+                t_name = str(item.get("name", ""))
+                raw_to = item.get("to")
+                to_obj: Mapping[str, Any] = raw_to if isinstance(raw_to, Mapping) else {}
+                to_status = str(to_obj.get("name") or "")
+                has_screen = bool(item.get("hasScreen", False))
+                if t_id and t_name and to_status:
+                    transitions.append(
+                        JiraTransitionView(
+                            transition_id=t_id,
+                            name=t_name,
+                            to_status=to_status,
+                            has_screen=has_screen,
+                        )
+                    )
+        return tuple(transitions)
+
+    async def execute_transition(
+        self, issue_key: str, transition_id: str, pat: str, comment: str | None = None
+    ) -> None:
+        payload: dict[str, object] = {"transition": {"id": transition_id}}
+        if comment:
+            payload["update"] = {"comment": [{"add": {"body": comment}}]}
+        await self._mutation_request(
+            "POST",
+            f"/issue/{quote(issue_key, safe='-')}/transitions",
+            pat,
+            Operation.JIRA_UPDATE,
+            json_payload=payload,
+        )
+
+    async def add_comment(self, issue_key: str, body: str, pat: str) -> str:
+        if not body.strip():
+            raise ValueError("comment body must not be empty")
+        response = await self._mutation_request(
+            "POST",
+            f"/issue/{quote(issue_key, safe='-')}/comment",
+            pat,
+            Operation.JIRA_UPDATE,
+            json_payload={"body": body},
+        )
+        data = self._json_object(response, Operation.JIRA_UPDATE, required=("id",))
+        return str(data["id"])
+
+    async def assign_issue(self, issue_key: str, assignee: str, pat: str) -> None:
+        await self._mutation_request(
+            "PUT",
+            f"/issue/{quote(issue_key, safe='-')}/assignee",
+            pat,
+            Operation.JIRA_UPDATE,
+            json_payload={"name": assignee if assignee else None},
+        )
+
+    async def block_issue(
+        self, issue_key: str, blocker_key: str, pat: str, reason: str | None = None
+    ) -> None:
+        link_payload = {
+            "type": {"name": "Blocks"},
+            "inwardIssue": {"key": issue_key},
+            "outwardIssue": {"key": blocker_key},
+        }
+        await self._mutation_request(
+            "POST",
+            "/issueLink",
+            pat,
+            Operation.JIRA_UPDATE,
+            json_payload=link_payload,
+        )
+        comment_text = f"⚠️ Blocked by {blocker_key}"
+        if reason:
+            comment_text += f": {reason}"
+        await self.add_comment(issue_key, comment_text, pat)
+
+    async def create_generic_issue_link(
+        self, pat: str, inward_key: str, outward_key: str, link_type: str = "Relates"
+    ) -> None:
+        link_payload = {
+            "type": {"name": link_type},
+            "inwardIssue": {"key": inward_key},
+            "outwardIssue": {"key": outward_key},
+        }
+        await self._mutation_request(
+            "POST",
+            "/issueLink",
+            pat,
+            Operation.JIRA_UPDATE,
+            json_payload=link_payload,
+        )
+
+    async def watch_issue(self, issue_key: str, pat: str) -> None:
+        await self._mutation_request(
+            "POST",
+            f"/issue/{quote(issue_key, safe='-')}/watchers",
+            pat,
+            Operation.JIRA_UPDATE,
+        )
+
+    async def unwatch_issue(self, issue_key: str, pat: str) -> None:
+        resp = await self._safe_request("GET", "/myself", pat, Operation.JIRA_UPDATE)
+        myself = self._json_object(resp, Operation.JIRA_UPDATE, required=("name",))
+        username = str(myself.get("name") or "")
+        await self._mutation_request(
+            "DELETE",
+            f"/issue/{quote(issue_key, safe='-')}/watchers?username={quote(username)}",
+            pat,
+            Operation.JIRA_UPDATE,
+        )
+
+    async def unblock_issue(self, issue_key: str, link_id: str, pat: str) -> None:
+        await self._mutation_request(
+            "DELETE",
+            f"/issueLink/{quote(link_id, safe='-')}",
+            pat,
+            Operation.JIRA_UPDATE,
+        )
+
+    def _parse_issue_view(self, data: Mapping[str, Any]) -> JiraIssueView:
+        issue_id = str(data.get("id", ""))
+        issue_key = str(data.get("key", ""))
+        raw_fields = data.get("fields")
+        fields: Mapping[str, Any] = raw_fields if isinstance(raw_fields, Mapping) else {}
+
+        summary = str(fields.get("summary") or "")
+        raw_status = fields.get("status")
+        status_data: Mapping[str, Any] = raw_status if isinstance(raw_status, Mapping) else {}
+        status = str(status_data.get("name") or "Open")
+
+        raw_priority = fields.get("priority")
+        priority_data: Mapping[str, Any] = raw_priority if isinstance(raw_priority, Mapping) else {}
+        priority = str(priority_data.get("name") or "Medium")
+
+        raw_assignee = fields.get("assignee")
+        assignee_data: Mapping[str, Any] = raw_assignee if isinstance(raw_assignee, Mapping) else {}
+        assignee = str(assignee_data.get("displayName") or assignee_data.get("name") or "")
+
+        raw_reporter = fields.get("reporter")
+        reporter_data: Mapping[str, Any] = raw_reporter if isinstance(raw_reporter, Mapping) else {}
+        reporter = str(reporter_data.get("displayName") or reporter_data.get("name") or "")
+
+        epic_key = ""
+        epic_field = fields.get("customfield_10008")
+        if isinstance(epic_field, str):
+            epic_key = epic_field
+
+        sprint_name = ""
+        sprint_field = fields.get("customfield_10007") or fields.get("sprint")
+        if isinstance(sprint_field, list) and sprint_field:
+            sp_str = str(sprint_field[-1])
+            if "name=" in sp_str:
+                sprint_name = sp_str.split("name=")[1].split(",")[0]
+            else:
+                sprint_name = sp_str
+
+        is_flagged = False
+        flagged_field = fields.get("customfield_10001") or fields.get("flagged")
+        if isinstance(flagged_field, list) and flagged_field:
+            is_flagged = any(isinstance(v, Mapping) and v.get("value") == "Impediment" for v in flagged_field)
+
+        blocker_keys: list[str] = []
+        issuelinks = fields.get("issuelinks")
+        if isinstance(issuelinks, list):
+            for link in issuelinks:
+                if isinstance(link, Mapping):
+                    raw_type = link.get("type")
+                    type_data: Mapping[str, Any] = raw_type if isinstance(raw_type, Mapping) else {}
+                    inward = type_data.get("inward")
+                    if inward and "block" in str(inward).lower():
+                        raw_inward = link.get("inwardIssue")
+                        inward_issue: Mapping[str, Any] = raw_inward if isinstance(raw_inward, Mapping) else {}
+                        key = inward_issue.get("key")
+                        if isinstance(key, str) and key:
+                            blocker_keys.append(key)
+
+        description = str(fields.get("description") or "")
+        updated_at = str(fields.get("updated") or "")
+        last_comment_summary = ""
+        raw_comment = fields.get("comment")
+        comment_data: Mapping[str, Any] = raw_comment if isinstance(raw_comment, Mapping) else {}
+        comments = comment_data.get("comments") if isinstance(comment_data.get("comments"), list) else []
+        if comments and isinstance(comments[-1], Mapping):
+            last_c = comments[-1]
+            raw_author = last_c.get("author")
+            author_data: Mapping[str, Any] = raw_author if isinstance(raw_author, Mapping) else {}
+            c_author = str(author_data.get("displayName") or "User")
+            c_body = str(last_c.get("body") or "")[:50]
+            last_comment_summary = f"{c_author}: {c_body}"
+
+        raw_watches = fields.get("watches")
+        watches_data: Mapping[str, Any] = raw_watches if isinstance(raw_watches, Mapping) else {}
+        is_watching = bool(watches_data.get("isWatching", False))
+
+        issue_url = f"{self._base_url}/browse/{quote(issue_key, safe='-')}"
+        return JiraIssueView(
+            issue_key=issue_key,
+            issue_id=issue_id,
+            summary=summary,
+            status=status,
+            priority=priority,
+            assignee=assignee,
+            reporter=reporter,
+            epic_key=epic_key,
+            sprint_name=sprint_name,
+            is_flagged=is_flagged,
+            blocker_keys=tuple(blocker_keys),
+            description=description,
+            issue_url=issue_url,
+            last_comment_summary=last_comment_summary,
+            updated_at=updated_at,
+            is_watching=is_watching,
+        )
 
     async def find_by_request_hash(
         self, project_key: str, request_hash: str, pat: str

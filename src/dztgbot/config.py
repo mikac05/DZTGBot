@@ -103,6 +103,7 @@ class Settings:
     max_queue_size: int
     max_concurrent_gemini: int
     max_concurrent_jira: int
+    notification_poll_interval_seconds: int = 300
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -145,6 +146,13 @@ class Settings:
             default="4",
             minimum=1,
             maximum=32,
+        )
+
+        notification_poll_interval_seconds = cls._parse_int(
+            "NOTIFICATION_POLL_INTERVAL_SECONDS",
+            default="300",
+            minimum=60,
+            maximum=86400,
         )
 
         telegram_allowed_user_ids = cls._parse_optional_allowed_users(
@@ -346,6 +354,7 @@ class Settings:
             max_queue_size=max_queue_size,
             max_concurrent_gemini=max_concurrent_gemini,
             max_concurrent_jira=max_concurrent_jira,
+            notification_poll_interval_seconds=notification_poll_interval_seconds,
         )
 
     @property

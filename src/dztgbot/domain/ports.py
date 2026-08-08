@@ -9,7 +9,10 @@ from .fsm import DraftState
 from .models import (
     Attachment,
     Draft,
+    JiraIssueView,
+    JiraSearchResult,
     JiraTaskTemplate,
+    JiraTransitionView,
     PublishedIssue,
     SourceMessageRef,
     SubmissionAttempt,
@@ -135,6 +138,45 @@ class JiraGatewayPort(Protocol):
         mime_type: str,
         pat: str,
     ) -> str:
+        ...
+
+    async def get_issue_details(self, issue_key: str, pat: str) -> JiraIssueView:
+        ...
+
+    async def search_jql(self, pat: str, jql: str, max_results: int = 7) -> JiraSearchResult:
+        ...
+
+    async def get_transitions(self, issue_key: str, pat: str) -> tuple[JiraTransitionView, ...]:
+        ...
+
+    async def execute_transition(
+        self, issue_key: str, transition_id: str, pat: str, comment: str | None = None
+    ) -> None:
+        ...
+
+    async def add_comment(self, issue_key: str, body: str, pat: str) -> str:
+        ...
+
+    async def assign_issue(self, issue_key: str, assignee: str, pat: str) -> None:
+        ...
+
+    async def block_issue(
+        self, issue_key: str, blocker_key: str, pat: str, reason: str | None = None
+    ) -> None:
+        ...
+
+    async def create_generic_issue_link(
+        self, pat: str, inward_key: str, outward_key: str, link_type: str = "Relates"
+    ) -> None:
+        ...
+
+    async def watch_issue(self, issue_key: str, pat: str) -> None:
+        ...
+
+    async def unwatch_issue(self, issue_key: str, pat: str) -> None:
+        ...
+
+    async def unblock_issue(self, issue_key: str, link_id: str, pat: str) -> None:
         ...
 
 

@@ -45,10 +45,16 @@ AUTH_STARTED_AT_KEY = "auth_started_at"
 # Reply-keyboard labels that must never be treated as credential material.
 _MENU_BUTTON_TEXTS = frozenset(
     {
+        "🔑 連結 Jira",
         "🔑 綁定 Jira 帳號",
         "🔑 绑定 Jira 账号",
+        "🚪 Logout",
         "🚪 解綁 Jira 帳號",
         "🚪 解绑 Jira 账号",
+        "📋 指派給我的",
+        "🚩 我建的",
+        "🔍 搜尋",
+        "📝 新建",
         "📝 手動建立 Jira 工單",
         "📖 說明",
         "📖 说明",
@@ -61,8 +67,8 @@ _AUTH_PROMPT = (
     "請直接發送您的 <b>Jira 個人存取令牌 (PAT)</b>。\n"
     "亦可使用 <code>Bearer 令牌內容</code> 格式。\n\n"
     "僅支援個人存取令牌；其他憑據格式已停用。\n\n"
-    "⚠️ <b>安全提示</b>：機器人收到憑據後將<b>立即自動刪除</b>您的訊息。\n"
-    "綁定操作有時間限制；逾時請重新發送 /auth。\n"
+    "⚠️ <b>安全提示</b>：機器人收到憑據後將<b>處理並刪除</b>您的訊息。\n"
+    "綁定操作有時間限制；逾時請重新點擊「🔑 連結 Jira」或發送 /auth。\n"
     "如需取消，請發送 /cancel。"
 )
 
@@ -95,22 +101,26 @@ _LATE_INPUT_ENDED = "綁定操作已結束。如需綁定請重新發送 /auth�
 async def get_main_menu_keyboard(
     user_id: int | None, user_store: UserStore
 ) -> ReplyKeyboardMarkup:
-    """Build a dynamic 2-row main menu keyboard based on user's auth status."""
+    """Build a dynamic main menu keyboard based on user's auth status."""
     is_authed = False
     if user_id is not None:
         credentials = await user_store.get(user_id)
         is_authed = credentials is not None
 
-    auth_button = (
-        KeyboardButton("🚪 解綁 Jira 帳號")
-        if is_authed
-        else KeyboardButton("🔑 綁定 Jira 帳號")
-    )
+    if is_authed:
+        return ReplyKeyboardMarkup(
+            [
+                [KeyboardButton("📋 指派給我的"), KeyboardButton("🚩 我建的")],
+                [KeyboardButton("🔍 搜尋"), KeyboardButton("📝 新建")],
+                [KeyboardButton("🚪 Logout")],
+            ],
+            resize_keyboard=True,
+            is_persistent=True,
+        )
 
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("📝 手動建立 Jira 工單")],
-            [auth_button, KeyboardButton("📖 說明")],
+            [KeyboardButton("🔑 連結 Jira"), KeyboardButton("📖 說明")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -299,18 +309,28 @@ def build_auth_handlers(
 
         keyboard = await get_main_menu_keyboard(user.id, user_store)
         await message.reply_text(
-            "📖 <b>DZTGBot 使用說明</b>\n\n"
-            "1️⃣ <b>訊息轉發建單（推薦）</b>：\n"
-            "直接將 Telegram 訊息轉發給機器人，AI 自動分析並生成 Jira 工單草稿。\n\n"
-            "2️⃣ <b>手動快速建單</b>：\n"
-            "• 點擊 <code>[📝 手動建立 Jira 工單]</code>\n"
-            "• 或輸入 <code>/new 工單標題</code> 快速建立\n"
-            "• 或直接發送訊息（第一行為標題，後續為描述，可附圖片）\n\n"
-            "3️⃣ <b>常用指令</b>：\n"
-            "/new — 📝 手動建立工單\n"
-            "/auth — 🔑 綁定 Jira 帳號 (PAT)\n"
-            "/logout — 🚪 解綁本機 Jira 認證（不會撤銷 Jira PAT）\n"
-            "/help — 📖 查看使用說明",
+            "📖 <b>DZTGBot Jira 助手使用指南</b>\n\n"
+            "🤖 <b>一、AI 智慧轉發建單</b>\n"
+            "• <b>轉發訊息建單：</b> 將任何對話或圖片轉發給機器人，AI 自動提取標題與內容產出草稿，點擊 <code>[✅ 確定提交]</code> 即可發布。\n"
+            "• <b>PROD 單號自動關聯：</b> 轉發內容含 <code>PROD-xxx</code> 時，自動建立非 PROD 開發單，並自動連結 (Relates to) 原 PROD 單號。\n\n"
+            "🔍 <b>二、工單搜尋與快速選單</b>\n"
+            "• <b>快捷選單按鈕：</b>\n"
+            "  - <code>[📋 指派給我的]</code>：列出指派給您的未解決工單 (/my)\n"
+            "  - <code>[🚩 我建的]</code>：列出您發起的工單 (/created)\n"
+            "  - <code>[🔍 搜尋]</code>：輸入 <code>/s 關鍵字</code> 搜尋工單 (/s)\n"
+            "  - <code>[📝 新建]</code>：手動建立工單草稿 (/new)\n"
+            "• <b>單號/網址自動開啟：</b> 在對話中發送 <code>PROJ-123</code> 或 Jira 網址，自動浮現互動卡片。\n"
+            "• <b>Inline 搜尋：</b> 在任何聊天視窗輸入 <code>@機器人名稱 關鍵字</code> 即可分享工單。\n\n"
+            "⚡ <b>三、工單卡片快捷操作 (Issue Card)</b>\n"
+            "• <b>工作流轉移：</b> 點擊 <code>[▶️ 開始開發]</code> 或 <code>[➡️ Move]</code> 切換 Jira 狀態。\n"
+            "• <b>回覆卡片新增留言/附件：</b> 直接<b>回覆 (Reply)</b> 卡片訊息（發送文字或照片），自動同步至 Jira！\n"
+            "• <b>指派與阻礙：</b> 點擊 <code>[👤 指派]</code> 快速指派，或點擊 <code>[⚠️ 阻礙]</code> 標記 Impediment 阻礙。\n"
+            "• <b>子任務建立：</b> 點擊 <code>[➕ 子任務]</code> 發起關聯 Sub-task 草稿。\n\n"
+            "🔔 <b>四、未讀通知推播</b>\n"
+            "• 每 5 分鐘自動輪詢並推播您的待辦異動與最新留言至 Telegram。\n\n"
+            "🔑 <b>五、帳號管理</b>\n"
+            "• <code>[🔑 連結 Jira]</code> 或 <code>/auth</code>：綁定 Jira PAT 個人存取令牌。\n"
+            "• <code>[🚪 Logout]</code> 或 <code>/logout</code>：解綁本機憑據。",
             reply_markup=keyboard,
             parse_mode="HTML",
         )
