@@ -73,6 +73,7 @@ class UserStore:
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._credentials: dict[int, JiraCredentials] = {}
+        self._languages: dict[int, str] = {}
         self._lock = asyncio.Lock()
 
     def _previous_path(self) -> Path:
@@ -92,6 +93,23 @@ class UserStore:
 
         async with self._lock:
             return self._credentials.get(telegram_user_id)
+
+    async def get_language(self, telegram_user_id: int) -> str:
+        """Return stored UI language preference for a user, defaulting to 'zh_TW'."""
+
+        async with self._lock:
+            return self._languages.get(telegram_user_id, "zh_TW")
+
+    async def set_language(self, telegram_user_id: int, language: str) -> None:
+        """Store or update UI language preference for a user."""
+
+        self._validate_user_id(telegram_user_id)
+        valid_lang = language if language in ("zh_TW", "en", "zh_CN") else "zh_TW"
+        async with self._lock:
+            lang_snapshot = dict(self._languages)
+            lang_snapshot[telegram_user_id] = valid_lang
+            await asyncio.to_thread(self._write_store, self._credentials, lang_snapshot)
+            self._languages = lang_snapshot
 
     async def store(
         self, telegram_user_id: int, credentials: JiraCredentials
@@ -232,7 +250,7 @@ class UserStore:
         if not isinstance(data, dict):
             raise UserStoreError("Credentials store root must be a JSON object.")
 
-        # Optional envelope: {"version": 1, "credentials": {...}}
+        # Optional envelope: {"version": 1, "credentials": {...}, "languages": {...}}
         if "credentials" in data:
             version = data.get("version", _SCHEMA_VERSION)
             if not isinstance(version, int) or version < 1:
@@ -243,6 +261,17 @@ class UserStore:
         else:
             # Legacy flat map of user_id -> entry
             payload = data
+
+        parsed_langs: dict[int, str] = {}
+        if isinstance(data.get("languages"), dict):
+            for u_key, l_val in data["languages"].items():
+                if isinstance(l_val, str) and l_val in ("zh_TW", "en", "zh_CN"):
+                    try:
+                        u_id = self._parse_user_id_key(u_key)
+                        parsed_langs[u_id] = l_val
+                    except UserStoreError:
+                        pass
+        self._languages = parsed_langs
 
         result: dict[int, JiraCredentials] = {}
         for user_id_key, entry in payload.items():
@@ -286,7 +315,12 @@ class UserStore:
             jira_pat=pat,
         )
 
-    def _serialize_store(self, credentials: dict[int, JiraCredentials]) -> str:
+    def _serialize_store(
+        self,
+        credentials: dict[int, JiraCredentials],
+        languages: dict[int, str] | None = None,
+    ) -> str:
+        lang_map = languages if languages is not None else self._languages
         payload = {
             str(user_id): {
                 "jira_username": cred.jira_username,
@@ -295,9 +329,14 @@ class UserStore:
             }
             for user_id, cred in sorted(credentials.items(), key=lambda item: item[0])
         }
+        lang_payload = {
+            str(user_id): lang
+            for user_id, lang in sorted(lang_map.items(), key=lambda item: item[0])
+        }
         document = {
             "version": _SCHEMA_VERSION,
             "credentials": payload,
+            "languages": lang_payload,
         }
         text = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
         if len(text.encode("utf-8")) > MAX_STORE_BYTES:
@@ -306,8 +345,12 @@ class UserStore:
         self._parse_store_document(json.loads(text))
         return text
 
-    def _write_store(self, credentials: dict[int, JiraCredentials]) -> None:
-        content = self._serialize_store(credentials)
+    def _write_store(
+        self,
+        credentials: dict[int, JiraCredentials],
+        languages: dict[int, str] | None = None,
+    ) -> None:
+        content = self._serialize_store(credentials, languages)
         self._atomic_write(content)
 
     def _atomic_write(self, content: str) -> None:

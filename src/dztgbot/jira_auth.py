@@ -12,9 +12,10 @@ import html
 import logging
 from datetime import datetime, timedelta, timezone
 
-from telegram import KeyboardButton, ReplyKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, Update
 from telegram.ext import (
     BaseHandler,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
@@ -35,6 +36,8 @@ from .domain.policy import (
 from .jira_client import JiraClient, JiraClientError
 from .user_store import JiraCredentials, UserStore, UserStoreError
 
+from .ui.i18n import get_text
+
 LOGGER = logging.getLogger(__name__)
 
 AWAITING_PAT = 0
@@ -42,33 +45,54 @@ AWAITING_PAT = 0
 # Conversation user_data key for auth conversation start (UTC, aware).
 AUTH_STARTED_AT_KEY = "auth_started_at"
 
-# Reply-keyboard labels that must never be treated as credential material.
+# Reply-keyboard labels in all supported languages that must never be treated as credential material.
 _MENU_BUTTON_TEXTS = frozenset(
     {
+        # Traditional Chinese
         "🔑 連結 Jira",
         "🔑 綁定 Jira 帳號",
-        "🔑 绑定 Jira 账号",
         "🚪 Logout",
         "🚪 解綁 Jira 帳號",
-        "🚪 解绑 Jira 账号",
         "📋 指派給我的",
         "🚩 我建的",
         "🔍 搜尋",
         "📝 新建",
         "📝 手動建立 Jira 工單",
+        "📊 站會報告",
+        "🌐 語言設置",
         "📖 說明",
-        "📖 说明",
+        # English
+        "🔑 Link Jira",
+        "📋 Assigned to Me",
+        "🚩 Created by Me",
+        "🔍 Search",
+        "📝 New Issue",
+        "📊 Standup Report",
+        "🌐 Language",
+        "📖 Help",
+        # Simplified Chinese
+        "🔑 绑定 Jira",
+        "🔑 绑定 Jira 账号",
+        "🚪 退出登录",
+        "🚪 解绑 Jira 账号",
+        "📋 指派给我的",
+        "🚩 我创建的",
+        "🔍 搜索",
+        "📝 新建工单",
+        "🌐 语言设置",
+        "📖 使用说明",
+        # Language selection buttons
+        "🇹🇼 繁體中文",
+        "🇺🇸 English",
+        "🇨🇳 简体中文",
     }
 )
 
 # Fixed user-visible messages (no credentials, provider bodies, or secret paths).
 _AUTH_PROMPT = (
     "🔑 <b>綁定您的 Jira 帳號</b>\n\n"
-    "請直接發送您的 <b>Jira 個人存取令牌 (PAT)</b>。\n"
-    "亦可使用 <code>Bearer 令牌內容</code> 格式。\n\n"
-    "僅支援個人存取令牌；其他憑據格式已停用。\n\n"
+    "請發送您的 <b>Jira 個人存取令牌 (PAT)</b>。\n\n"
     "⚠️ <b>安全提示</b>：機器人收到憑據後將<b>處理並刪除</b>您的訊息。\n"
-    "綁定操作有時間限制；逾時請重新點擊「🔑 連結 Jira」或發送 /auth。\n"
     "如需取消，請發送 /cancel。"
 )
 
@@ -78,7 +102,6 @@ _AUTH_PROMPT_BASIC_ALLOWED = (
     "請發送您的 <b>Jira 個人存取令牌 (PAT)</b>，\n"
     "或發送 <code>帳號:密碼</code> (例如 <code>username:password</code>)。\n\n"
     "⚠️ <b>安全提示</b>：機器人收到憑據後將<b>處理並刪除</b>您的訊息。\n"
-    "綁定操作有時間限制；逾時請重新點擊「🔑 連結 Jira」或發送 /auth。\n"
     "如需取消，請發送 /cancel。"
 )
 # --- END TEMPORARY BASIC AUTH COMPATIBILITY PROMPT ---
@@ -112,18 +135,30 @@ _LATE_INPUT_ENDED = "綁定操作已結束。如需綁定請重新發送 /auth�
 async def get_main_menu_keyboard(
     user_id: int | None, user_store: UserStore
 ) -> ReplyKeyboardMarkup:
-    """Build a dynamic main menu keyboard based on user's auth status."""
+    """Build a dynamic main menu keyboard based on user's auth status and language preference."""
     is_authed = False
+    lang = "zh_TW"
     if user_id is not None:
         credentials = await user_store.get(user_id)
         is_authed = credentials is not None
+        lang = await user_store.get_language(user_id)
 
     if is_authed:
         return ReplyKeyboardMarkup(
             [
-                [KeyboardButton("📋 指派給我的"), KeyboardButton("🚩 我建的")],
-                [KeyboardButton("🔍 搜尋"), KeyboardButton("📝 新建")],
-                [KeyboardButton("🚪 Logout")],
+                [
+                    KeyboardButton(get_text("btn_my_issues", lang)),
+                    KeyboardButton(get_text("btn_created_issues", lang)),
+                ],
+                [
+                    KeyboardButton(get_text("btn_search", lang)),
+                    KeyboardButton(get_text("btn_new", lang)),
+                ],
+                [
+                    KeyboardButton(get_text("btn_standup", lang)),
+                    KeyboardButton(get_text("btn_language", lang)),
+                    KeyboardButton(get_text("btn_logout", lang)),
+                ],
             ],
             resize_keyboard=True,
             is_persistent=True,
@@ -131,7 +166,11 @@ async def get_main_menu_keyboard(
 
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton("🔑 連結 Jira"), KeyboardButton("📖 說明")],
+            [
+                KeyboardButton(get_text("btn_auth", lang)),
+                KeyboardButton(get_text("btn_language", lang)),
+                KeyboardButton(get_text("btn_help", lang)),
+            ],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -591,11 +630,51 @@ def build_auth_handlers(
                 reply_markup=keyboard,
             )
 
+    async def language_command(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Display language selection inline keyboard."""
+
+        message = update.effective_message
+        user = update.effective_user
+        if message is None or user is None:
+            return
+        lang = await user_store.get_language(user.id)
+        prompt = get_text("lang_select_prompt", lang)
+        await message.reply_text(
+            prompt,
+            reply_markup=build_language_selection_keyboard(),
+            parse_mode="HTML",
+        )
+
+    async def handle_language_callback(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Process language selection callback."""
+
+        query = update.callback_query
+        user = update.effective_user
+        if query is None or user is None:
+            return
+        await query.answer()
+        data = query.data or ""
+        if data.startswith("set_lang:"):
+            selected_lang = data.split(":")[1]
+            await user_store.set_language(user.id, selected_lang)
+            keyboard = await get_main_menu_keyboard(user.id, user_store)
+            notice = get_text("lang_changed_notice", selected_lang)
+            try:
+                await query.edit_message_text(notice, parse_mode="HTML")
+            except Exception:
+                pass
+            if query.message:
+                await query.message.reply_text("✨", reply_markup=keyboard)
+
     auth_conversation = ConversationHandler(
         entry_points=[
             CommandHandler("auth", auth_entry),
             MessageHandler(
-                filters.Regex(r"^(🔑 綁定 Jira 帳號|🔑 绑定 Jira 账号)$"),
+                filters.Regex(r"^(🔑 連結 Jira|🔑 Link Jira|🔑 綁定 Jira 帳號|🔑 绑定 Jira 账号|🔑 绑定 Jira)$"),
                 auth_entry,
             ),
         ],
@@ -618,6 +697,66 @@ def build_auth_handlers(
         CommandHandler("start", start_command),
         CommandHandler("logout", logout_command),
         CommandHandler("help", help_command),
+    )
+
+
+def build_language_handlers(
+    user_store: UserStore,
+) -> tuple[CommandHandler, CallbackQueryHandler, MessageHandler]:
+    """Build /language command handler, callback handler, and reply button handler."""
+
+    async def language_command(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        message = update.effective_message
+        user = update.effective_user
+        if message is None or user is None:
+            return
+        lang = await user_store.get_language(user.id)
+        prompt = get_text("lang_select_prompt", lang)
+        await message.reply_text(
+            prompt,
+            reply_markup=build_language_selection_keyboard(),
+            parse_mode="HTML",
+        )
+
+    async def handle_language_callback(
+        update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        query = update.callback_query
+        user = update.effective_user
+        if query is None or user is None:
+            return
+        await query.answer()
+        data = query.data or ""
+        if data.startswith("set_lang:"):
+            selected_lang = data.split(":")[1]
+            await user_store.set_language(user.id, selected_lang)
+            keyboard = await get_main_menu_keyboard(user.id, user_store)
+            notice = get_text("lang_changed_notice", selected_lang)
+            try:
+                await query.edit_message_text(notice, parse_mode="HTML")
+            except Exception:
+                pass
+            if query.message:
+                await query.message.reply_text("✨", reply_markup=keyboard)
+
+    cmd_h = CommandHandler("language", language_command)
+    cb_h = CallbackQueryHandler(handle_language_callback, pattern=r"^set_lang:")
+    btn_h = MessageHandler(filters.Regex(r"^(🌐 語言設置|🌐 Language|🌐 语言设置)$"), language_command)
+    return cmd_h, cb_h, btn_h
+
+
+def build_language_selection_keyboard() -> InlineKeyboardMarkup:
+    """Build inline keyboard for UI language selection."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🇹🇼 繁體中文", callback_data="set_lang:zh_TW"),
+                InlineKeyboardButton("🇺🇸 English", callback_data="set_lang:en"),
+                InlineKeyboardButton("🇨🇳 简体中文", callback_data="set_lang:zh_CN"),
+            ]
+        ]
     )
 
 

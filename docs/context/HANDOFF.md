@@ -54,10 +54,10 @@ Keep the service pilot-only. With explicit target-environment authorization, exe
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-08T16:32:07Z`
+- Generated UTC: `2026-08-08T16:39:12Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `41f89d7c8187`
-- Working-tree entries before metadata refresh: `5`
+- Base commit before this handoff: `6d5d97f2065a`
+- Working-tree entries before metadata refresh: `6`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->

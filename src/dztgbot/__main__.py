@@ -384,13 +384,16 @@ async def run() -> None:
             allowed_user_ids=settings.telegram_allowed_user_ids,
             auth_pat_only=settings.auth_pat_only,
         )
+        from dztgbot.jira_auth import build_language_handlers
+        lang_h, lang_cb, lang_btn = build_language_handlers(user_store)
         from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, InlineQueryHandler, filters
-        logout_btn = MessageHandler(filters.Regex(r"^(🚪 Logout|🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_h.callback)
-        auth_btn = MessageHandler(filters.Regex(r"^(🔑 連結 Jira|🔑 綁定 Jira 帳號|🔑 绑定 Jira 账号)$"), auth_conv.entry_points[0].callback)
-        my_btn = MessageHandler(filters.Regex(r"^(📋 指派給我的)$"), search_handlers.handle_my_open)
-        created_btn = MessageHandler(filters.Regex(r"^(🚩 我建的)$"), search_handlers.handle_created)
-        search_prompt_btn = MessageHandler(filters.Regex(r"^(🔍 搜尋)$"), search_handlers.handle_search_prompt)
-        help_btn = MessageHandler(filters.Regex(r"^(📖 說明|📖 说明)$"), help_h.callback)
+        logout_btn = MessageHandler(filters.Regex(r"^(🚪 Logout|🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号|🚪 退出登录)$"), logout_h.callback)
+        auth_btn = MessageHandler(filters.Regex(r"^(🔑 連結 Jira|🔑 Link Jira|🔑 綁定 Jira 帳號|🔑 绑定 Jira 账号|🔑 绑定 Jira)$"), auth_conv.entry_points[0].callback)
+        my_btn = MessageHandler(filters.Regex(r"^(📋 指派給我的|📋 Assigned to Me|📋 指派给我的)$"), search_handlers.handle_my_open)
+        created_btn = MessageHandler(filters.Regex(r"^(🚩 我建的|🚩 Created by Me|🚩 我创建的)$"), search_handlers.handle_created)
+        search_prompt_btn = MessageHandler(filters.Regex(r"^(🔍 搜尋|🔍 Search|🔍 搜索)$"), search_handlers.handle_search_prompt)
+        standup_btn = MessageHandler(filters.Regex(r"^(📊 站會報告|📊 Standup Report|📊 站会报告)$"), search_handlers.handle_standup_report)
+        help_btn = MessageHandler(filters.Regex(r"^(📖 說明|📖 Help|📖 使用說明|📖 使用说明)$"), help_h.callback)
 
         admin_handlers = build_admin_handlers(
             rules_store,
@@ -442,6 +445,10 @@ async def run() -> None:
             my_btn,
             created_btn,
             search_prompt_btn,
+            standup_btn,
+            lang_h,
+            lang_cb,
+            lang_btn,
             help_h,
             help_btn,
             *admin_handlers,
