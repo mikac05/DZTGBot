@@ -72,6 +72,17 @@ _AUTH_PROMPT = (
     "如需取消，請發送 /cancel。"
 )
 
+# --- TEMPORARY BASIC AUTH COMPATIBILITY PROMPT (EASY TO REMOVE LATER) ---
+_AUTH_PROMPT_BASIC_ALLOWED = (
+    "🔑 <b>綁定您的 Jira 帳號</b>\n\n"
+    "請發送您的 <b>Jira 個人存取令牌 (PAT)</b>，\n"
+    "或發送 <code>帳號:密碼</code> (例如 <code>username:password</code>)。\n\n"
+    "⚠️ <b>安全提示</b>：機器人收到憑據後將<b>處理並刪除</b>您的訊息。\n"
+    "綁定操作有時間限制；逾時請重新點擊「🔑 連結 Jira」或發送 /auth。\n"
+    "如需取消，請發送 /cancel。"
+)
+# --- END TEMPORARY BASIC AUTH COMPATIBILITY PROMPT ---
+
 _GROUP_REDIRECT = (
     "🔒 為了您的帳號安全，請在與機器人的私聊視窗中操作。\n"
     "點擊機器人頭像即可開啟私聊。"
@@ -212,6 +223,7 @@ def build_auth_handlers(
     *,
     auth_ttl_seconds: int = DEFAULT_AUTH_TTL_SECONDS,
     allowed_user_ids: frozenset[int] | None = None,
+    auth_pat_only: bool = True,
 ) -> tuple[ConversationHandler, BaseHandler, BaseHandler, BaseHandler]:
     """Build /start, /auth conversation, /logout, and /help handlers.
 
@@ -329,7 +341,7 @@ def build_auth_handlers(
             "🔔 <b>四、未讀通知推播</b>\n"
             "• 每 5 分鐘自動輪詢並推播您的待辦異動與最新留言至 Telegram。\n\n"
             "🔑 <b>五、帳號管理</b>\n"
-            "• <code>[🔑 連結 Jira]</code> 或 <code>/auth</code>：綁定 Jira PAT 個人存取令牌。\n"
+            "• <code>[🔑 連結 Jira]</code> 或 <code>/auth</code>：綁定 Jira 個人存取令牌 (PAT) 或 帳號:密碼。\n"
             "• <code>[🚪 Logout]</code> 或 <code>/logout</code>：解綁本機憑據。",
             reply_markup=keyboard,
             parse_mode="HTML",
@@ -355,7 +367,8 @@ def build_auth_handlers(
             return ConversationHandler.END
 
         _mark_auth_started(context, _utc_now())
-        await message.reply_text(_AUTH_PROMPT, parse_mode="HTML")
+        prompt_text = _AUTH_PROMPT if auth_pat_only else _AUTH_PROMPT_BASIC_ALLOWED
+        await message.reply_text(prompt_text, parse_mode="HTML")
         return AWAITING_PAT
 
     async def receive_pat(
@@ -418,14 +431,14 @@ def build_auth_handlers(
             )
             return ConversationHandler.END
 
-        decision = credential_policy_decision(stripped)
+        decision = credential_policy_decision(stripped, pat_only=auth_pat_only)
         if not decision.allowed:
             code = decision.denial_code or DenialCode.CREDENTIAL_FORMAT_REJECTED
             await chat.send_message(user_message_for_denial(code))
             # Empty / wrong shape: remain in conversation until TTL or cancel.
             return AWAITING_PAT
 
-        pat = normalize_pat_input(stripped)
+        pat = normalize_pat_input(stripped, pat_only=auth_pat_only)
         if pat is None:
             await chat.send_message(
                 user_message_for_denial(DenialCode.CREDENTIAL_FORMAT_REJECTED)

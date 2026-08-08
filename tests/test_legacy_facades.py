@@ -129,7 +129,7 @@ class LegacyJiraFacadeTests(unittest.IsolatedAsyncioTestCase):
         client = JiraClient(base_url="https://jira.example")
         try:
             with self.assertRaises(JiraClientError) as raised:
-                await client.create_issue("Basic unsafe", legacy_template())
+                await client.create_issue(" ", legacy_template())
             self.assertEqual(str(raised.exception), SafeErrorCode.VALIDATION_FAILED.value)
             self.assertEqual(raised.exception.classification.kind, ErrorKind.VALIDATION)
             self.assertEqual(

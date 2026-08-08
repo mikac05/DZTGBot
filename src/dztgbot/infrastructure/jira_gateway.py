@@ -216,9 +216,14 @@ class JiraGateway:
     @staticmethod
     def _headers(pat: str, *, attachment: bool = False) -> dict[str, str]:
         token = pat.strip()
-        if not token or token.lower().startswith(("basic ", "bearer ")):
-            raise ValueError("pat must be a raw Personal Access Token")
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        if not token:
+            raise ValueError("credential token must be a non-empty string")
+        if token.lower().startswith(("basic ", "bearer ")):
+            auth_header = token
+        else:
+            auth_header = f"Bearer {token}"
+
+        headers = {"Authorization": auth_header, "Accept": "application/json"}
         if attachment:
             headers["X-Atlassian-Token"] = "no-check"
         return headers

@@ -382,6 +382,7 @@ async def run() -> None:
             legacy_jira_client,
             settings.jira_url,
             allowed_user_ids=settings.telegram_allowed_user_ids,
+            auth_pat_only=settings.auth_pat_only,
         )
         from telegram.ext import CommandHandler, CallbackQueryHandler, MessageHandler, InlineQueryHandler, filters
         logout_btn = MessageHandler(filters.Regex(r"^(🚪 Logout|🚪 解綁 Jira 帳號|🚪 解绑 Jira 账号)$"), logout_h.callback)

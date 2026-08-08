@@ -12,6 +12,8 @@ Policies encoded here (MASTER_PLAN §2 and P1-G):
 
 from __future__ import annotations
 
+import base64
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
@@ -259,31 +261,45 @@ def classify_credential_input(raw: str | None) -> CredentialInputKind:
     return CredentialInputKind.PAT
 
 
-def normalize_pat_input(raw: str) -> str | None:
-    """Return the PAT string to store/validate, or None if rejected/empty.
+def normalize_pat_input(raw: str, pat_only: bool = True) -> str | None:
+    """Return the normalized credential string to store/validate, or None if rejected/empty.
 
-    Strips an optional ``Bearer `` prefix. Never returns password/cookie shapes.
+    Supports PAT Bearer tokens. When pat_only is False, also supports Basic Auth (username:password or Basic <base64>).
     """
+    if not raw or not raw.strip():
+        return None
+
+    text = raw.strip()
+    lower = text.casefold()
+
+    if lower.startswith("bearer "):
+        return text[7:].strip() or None
+
+    # --- TEMPORARY BASIC AUTH COMPATIBILITY BLOCK (EASY TO REMOVE LATER) ---
+    if not pat_only:
+        if lower.startswith("basic "):
+            return text
+        if ":" in text and not lower.startswith("http"):
+            encoded = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+            return f"Basic {encoded}"
+    # --- END TEMPORARY BASIC AUTH COMPATIBILITY BLOCK ---
 
     kind = classify_credential_input(raw)
-    if kind is CredentialInputKind.REJECTED_EMPTY:
-        return None
     if kind is not CredentialInputKind.PAT:
         return None
-    text = raw.strip()
-    if text.casefold().startswith("bearer "):
-        return text[7:].strip() or None
+
     return text
 
 
-def credential_policy_decision(raw: str | None) -> PolicyDecision:
+def credential_policy_decision(raw: str | None, pat_only: bool = True) -> PolicyDecision:
     """Policy gate for credential submission (shape only)."""
-
-    kind = classify_credential_input(raw)
-    if kind is CredentialInputKind.PAT:
-        return PolicyDecision.allow()
-    if kind is CredentialInputKind.REJECTED_EMPTY:
+    if not raw or not raw.strip():
         return PolicyDecision.deny(DenialCode.CREDENTIAL_EMPTY)
+
+    norm = normalize_pat_input(raw, pat_only=pat_only)
+    if norm is not None:
+        return PolicyDecision.allow()
+
     return PolicyDecision.deny(DenialCode.CREDENTIAL_FORMAT_REJECTED)
 
 
