@@ -204,6 +204,7 @@ class IntakeServiceTests(unittest.IsolatedAsyncioTestCase):
         assert durable is not None
         self.assertEqual(durable.state, DraftState.REVIEW)
         self.assertEqual(durable.revision, 3)
+        self.assertEqual(completed.revision, durable.revision)  # type: ignore[union-attr]
         self.assertEqual(durable.source_messages, (source,))
         self.assertEqual(durable.attachments, (attachment,))
         self.assertEqual(durable.template.summary, "batch:1")  # type: ignore[union-attr]

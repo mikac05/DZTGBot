@@ -1,7 +1,7 @@
-python-telegram-bot==22.8
-google-genai==2.17.0
-httpx==0.28.1
-pydantic==2.13.4
-python-dotenv==1.2.2
-
-# Offline tests use Python's standard-library unittest package.
+# Runtime dependencies only. Exact pins are reviewed deliberately as one release
+# set; development and CI tooling belongs in requirements-dev.txt.
+python-telegram-bot==22.8  # Async Telegram polling and handler API.
+google-genai==2.17.0  # Gemini adapter SDK.
+httpx==0.28.1  # Shared async Jira transport.
+pydantic==2.13.4  # Strict provider response validation.
+python-dotenv==1.2.2  # Local environment-file loading; secrets stay untracked.

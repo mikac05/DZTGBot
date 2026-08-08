@@ -10,6 +10,10 @@ import tempfile
 from pathlib import Path
 
 LOGGER = logging.getLogger(__name__)
+DEFAULT_MAX_RULE_BYTES = 64 * 1024
+
+
+RulesSignature = tuple[int, int, int, int]
 
 
 class RulesStoreError(RuntimeError):
@@ -19,10 +23,14 @@ class RulesStoreError(RuntimeError):
 class RulesStore:
     """Maintain disk-backed rules with an in-memory last-known-good fallback."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, max_bytes: int = DEFAULT_MAX_RULE_BYTES) -> None:
+        if max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
         self._path = path
         self._backup_path = path.with_name(f"{path.name}.previous")
+        self._max_bytes = max_bytes
         self._current: str | None = None
+        self._observed_signature: RulesSignature | None = None
         self._lock = asyncio.Lock()
 
     async def initialize(self) -> None:
@@ -52,6 +60,9 @@ class RulesStore:
                 await asyncio.to_thread(self._atomic_write, self._backup_path, loaded)
 
             self._current = loaded
+            self._observed_signature = await asyncio.to_thread(
+                self._file_signature, self._path
+            )
 
     async def current_rules(self) -> str:
         """Return current rules and hot-reload a valid external file change."""
@@ -60,6 +71,13 @@ class RulesStore:
             if self._current is None:
                 raise RulesStoreError("Rules store has not been initialized.")
 
+            signature = await asyncio.to_thread(self._file_signature, self._path)
+            if signature == self._observed_signature:
+                return self._current
+
+            # Remember the identity before reading.  A malformed unchanged file
+            # is checked only once, while any subsequent replacement is retried.
+            self._observed_signature = signature
             try:
                 loaded = await asyncio.to_thread(self._read_validated, self._path)
             except RulesStoreError as error:
@@ -100,6 +118,9 @@ class RulesStore:
                 ) from error
 
             self._current = reloaded
+            self._observed_signature = await asyncio.to_thread(
+                self._file_signature, self._path
+            )
             LOGGER.info("Runtime Jira rules updated and hot-reloaded")
 
     @staticmethod
@@ -109,20 +130,30 @@ class RulesStore:
             raise RulesStoreError("Rules must not be empty.")
         return normalized
 
-    @classmethod
-    def _read_validated(cls, path: Path) -> str:
+    @staticmethod
+    def _file_signature(path: Path) -> RulesSignature | None:
+        try:
+            info = path.stat(follow_symlinks=False)
+        except OSError:
+            return None
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+    def _read_validated(self, path: Path) -> str:
         try:
             flags = os.O_RDONLY
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
             file_descriptor = os.open(path, flags)
-            with os.fdopen(file_descriptor, "r", encoding="utf-8") as handle:
+            with os.fdopen(file_descriptor, "rb") as handle:
                 if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                     raise RulesStoreError("Rules path is not a regular file.")
-                content = handle.read()
+                raw = handle.read(self._max_bytes + 1)
+                if len(raw) > self._max_bytes:
+                    raise RulesStoreError("Rules file exceeds the configured size limit.")
+                content = raw.decode("utf-8")
         except (OSError, UnicodeError) as error:
             raise RulesStoreError(f"Could not read rules file: {path}") from error
-        return cls._validate(content)
+        return self._validate(content)
 
     @staticmethod
     def _atomic_write(path: Path, content: str) -> None:

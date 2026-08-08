@@ -1,3 +1,17 @@
 """Persistence package for SQLite workflow storage and database migrations."""
 
-__all__: list[str] = []
+from .workflow_sqlite import (
+    MigrationError,
+    SQLiteWorkflowRepository,
+    WorkflowDataError,
+    WorkflowNotFoundError,
+    WorkflowRepositoryError,
+)
+
+__all__ = [
+    "MigrationError",
+    "SQLiteWorkflowRepository",
+    "WorkflowDataError",
+    "WorkflowNotFoundError",
+    "WorkflowRepositoryError",
+]

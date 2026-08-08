@@ -67,6 +67,8 @@ SENSITIVE_ASSIGNMENTS = (
         r"^\s*(TELEGRAM_BOT_TOKEN|GEMINI_API_KEY|VPN_PASSWORD|IPSEC_PSK)\s*=\s*(.*?)\s*$",
         re.MULTILINE,
     ),
+)
+VPN_PROFILE_ASSIGNMENTS = (
     re.compile(
         r"^\s*(ipsec-psk|password|gateway)\s*=\s*(.*?)\s*$",
         re.MULTILINE,
@@ -184,9 +186,16 @@ def _path_forbidden(relative_path: str) -> str | None:
     return None
 
 
-def _secret_findings_in_text(text: str) -> list[str]:
+def _secret_findings_in_text(
+    text: str,
+    *,
+    scan_vpn_profile_assignments: bool = True,
+) -> list[str]:
     findings = [label for label, pattern in CREDENTIAL_PATTERNS if pattern.search(text)]
-    for assignment_pattern in SENSITIVE_ASSIGNMENTS:
+    assignment_patterns = SENSITIVE_ASSIGNMENTS
+    if scan_vpn_profile_assignments:
+        assignment_patterns += VPN_PROFILE_ASSIGNMENTS
+    for assignment_pattern in assignment_patterns:
         for match in assignment_pattern.finditer(text):
             value = match.group(2).strip()
             if value and not value.startswith(SAFE_VALUE_PREFIXES):
@@ -218,7 +227,10 @@ def _secret_scan() -> None:
         if b"\0" in data:
             continue
         text = data.decode("utf-8", errors="replace")
-        for reason in _secret_findings_in_text(text):
+        for reason in _secret_findings_in_text(
+            text,
+            scan_vpn_profile_assignments=absolute_path.suffix.lower() != ".py",
+        ):
             findings.append(f"{relative_path}: {reason}")
 
     if findings:

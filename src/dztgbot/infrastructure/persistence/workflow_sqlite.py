@@ -31,6 +31,7 @@ from ...domain.fsm import (
     DraftState,
     TransitionCommand,
     evaluate_transition,
+    validate_transition,
 )
 from ...domain.models import (
     Attachment,
@@ -544,49 +545,71 @@ class SQLiteWorkflowRepository:
             ).fetchone()
             if existing is not None:
                 actual_revision = int(existing["revision"])
-                if actual_revision != draft.revision:
-                    raise RevisionConflictError(draft.revision, actual_revision)
+                expected_previous_revision = draft.revision - 1
+                if actual_revision != expected_previous_revision:
+                    raise RevisionConflictError(
+                        expected_previous_revision, actual_revision
+                    )
                 actual_state = DraftState(existing["state"])
                 if actual_state is not draft.state:
-                    raise StateConflictError(draft.state, actual_state)
+                    validate_transition(actual_state, draft.state)
 
             expiry_value = (
                 _to_db_datetime(expires_at)
                 if expires_at is not None
                 else (existing["expires_at"] if existing is not None else None)
             )
-            values = (
-                draft.draft_id,
-                draft.owner_id,
-                draft.chat_id,
-                draft.message_thread_id,
-                draft.state.value,
-                draft.revision,
-                _template_to_json(draft.template),
-                _to_db_datetime(draft.created_at),
-                _to_db_datetime(draft.updated_at),
-                expiry_value,
-                draft.last_error,
-            )
-            connection.execute(
-                """
-                INSERT INTO workflows(
-                    draft_id, owner_id, chat_id, message_thread_id, state,
-                    revision, template_json, created_at, updated_at, expires_at,
-                    last_error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(draft_id) DO UPDATE SET
-                    owner_id=excluded.owner_id,
-                    chat_id=excluded.chat_id,
-                    message_thread_id=excluded.message_thread_id,
-                    template_json=excluded.template_json,
-                    created_at=excluded.created_at,
-                    updated_at=excluded.updated_at,
-                    expires_at=excluded.expires_at,
-                    last_error=excluded.last_error
-                """,
-                values,
-            )
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO workflows(
+                        draft_id, owner_id, chat_id, message_thread_id, state,
+                        revision, template_json, created_at, updated_at, expires_at,
+                        last_error
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        draft.draft_id,
+                        draft.owner_id,
+                        draft.chat_id,
+                        draft.message_thread_id,
+                        draft.state.value,
+                        draft.revision,
+                        _template_to_json(draft.template),
+                        _to_db_datetime(draft.created_at),
+                        _to_db_datetime(draft.updated_at),
+                        expiry_value,
+                        draft.last_error,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE workflows
+                    SET owner_id=?, chat_id=?, message_thread_id=?, state=?,
+                        revision=?, template_json=?, created_at=?, updated_at=?,
+                        expires_at=?, last_error=?
+                    WHERE draft_id=? AND revision=?
+                    """,
+                    (
+                        draft.owner_id,
+                        draft.chat_id,
+                        draft.message_thread_id,
+                        draft.state.value,
+                        draft.revision,
+                        _template_to_json(draft.template),
+                        _to_db_datetime(draft.created_at),
+                        _to_db_datetime(draft.updated_at),
+                        expiry_value,
+                        draft.last_error,
+                        draft.draft_id,
+                        draft.revision - 1,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise RevisionConflictError(
+                        draft.revision - 1, int(existing["revision"])
+                    )
 
             connection.execute(
                 "DELETE FROM source_messages WHERE draft_id=?", (draft.draft_id,)
@@ -671,11 +694,11 @@ class SQLiteWorkflowRepository:
                 attachment_values,
             )
 
-            if draft.published_issue is None:
+            if draft.published_issue is None and existing is None:
                 connection.execute(
                     "DELETE FROM published_issues WHERE draft_id=?", (draft.draft_id,)
                 )
-            else:
+            elif draft.published_issue is not None:
                 self._upsert_published_issue(
                     connection, draft.draft_id, draft.published_issue
                 )
@@ -1142,6 +1165,40 @@ class SQLiteWorkflowRepository:
             )
             connection.commit()
             return cursor.rowcount == 1
+        except Exception:
+            self._rollback(connection)
+            raise
+        finally:
+            connection.close()
+
+    async def invalidate_draft_preview_tokens(
+        self, draft_id: str, *, at: datetime
+    ) -> int:
+        """Atomically expire every still-active callback bound to one draft."""
+
+        if not draft_id:
+            raise ValueError("draft_id must not be empty")
+        _validate_datetime(at, name="at")
+        return await self._run(
+            self._invalidate_draft_preview_tokens_sync, draft_id, at
+        )
+
+    def _invalidate_draft_preview_tokens_sync(
+        self, draft_id: str, at: datetime
+    ) -> int:
+        connection = self._connect()
+        self._begin(connection)
+        try:
+            invalidated_at = _to_db_datetime(at)
+            cursor = connection.execute(
+                """
+                UPDATE callback_tokens SET expires_at=?
+                WHERE draft_id=? AND consumed_at IS NULL AND expires_at>?
+                """,
+                (invalidated_at, draft_id, invalidated_at),
+            )
+            connection.commit()
+            return cursor.rowcount
         except Exception:
             self._rollback(connection)
             raise

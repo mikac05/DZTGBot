@@ -1,0 +1,87 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# The gate is intentionally correctness-oriented while the new architecture is
+# converging. Formatting and import-order cleanup can land independently.
+select = ["E4", "E7", "E9", "F", "B", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# Existing Phase 1-7 integration imports are quarantined explicitly instead of
+# weakening undefined-name and control-flow checks for the entire repository.
+"src/dztgbot/__main__.py" = ["F401", "F841"]
+"src/dztgbot/domain/ports.py" = ["F401"]
+"src/dztgbot/infrastructure/gemini_gateway.py" = ["F401"]
+"src/dztgbot/infrastructure/persistence/workflow_sqlite.py" = ["F401"]
+"src/dztgbot/services/callback_service.py" = ["F401"]
+"src/dztgbot/services/limits.py" = ["B904"]
+"src/dztgbot/services/workflow_service.py" = ["F401"]
+"src/dztgbot/ui/handlers/callbacks.py" = ["F401"]
+"src/dztgbot/ui/handlers/drafts.py" = ["F401"]
+"src/dztgbot/ui/keyboards.py" = ["F401"]
+"src/dztgbot/ui/rendering.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+show_error_codes = true
+pretty = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+# Analyze every new architectural layer and the composition root, but do not make
+# legacy facades (core.py, analysis.py, jira_client.py, etc.) part of this gate.
+files = [
+    "src/dztgbot/domain",
+    "src/dztgbot/services",
+    "src/dztgbot/infrastructure",
+    "src/dztgbot/ui",
+    "src/dztgbot/__main__.py",
+]
+# Third-party and deliberately ungated legacy imports are boundary types here.
+# The files listed above are still checked with strict local annotations.
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = "dztgbot.infrastructure.gemini_gateway"
+# The provider DTO subclasses a dynamically typed SDK model boundary.
+disable_error_code = ["misc"]
+
+[[tool.mypy.overrides]]
+module = ["dztgbot.infrastructure.persistence.workflow_sqlite", "dztgbot.ui.handlers"]
+# Ignores are required when fully typed dependencies are followed in downstream
+# release environments, but appear unused at this isolated boundary.
+disable_error_code = ["unused-ignore"]
+
+[[tool.mypy.overrides]]
+module = "dztgbot.ui.handlers.drafts"
+# The settings compatibility wrapper accepts the framework-provided callable and
+# adapts its dynamically typed class-level hook.
+disable_error_code = ["misc", "no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "dztgbot.__main__"
+# Composition checks concrete implementations against deliberately narrow ports;
+# the runtime wiring tests remain authoritative for these adapter joins. The PTB
+# processor base class is also dynamically typed at this isolated import boundary.
+disable_error_code = ["arg-type", "misc"]
+
+[tool.coverage.run]
+branch = true
+source = ["dztgbot"]
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 0
+# This is the persistence/mutation floor. CI applies a separate 90% gate to the
+# smaller FSM/callback/security slice; neither threshold includes legacy modules.
+fail_under = 75
+exclude_lines = [
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@overload",
+]

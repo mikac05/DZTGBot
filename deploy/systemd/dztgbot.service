@@ -2,6 +2,8 @@
 Description=DZTGBot Telegram service
 Wants=network-online.target
 After=network-online.target
+# Bound restart storm protection. The deploy script also calls systemctl reset-failed
+# before a deliberate start/restart so operator-driven rollouts remain deterministic.
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -17,6 +19,9 @@ Group=TODO_REPLACE_WITH_SERVICE_GROUP
 WorkingDirectory=/TODO_REPLACE_WITH_ABSOLUTE_PROJECT_DIRECTORY
 
 # TODO / PLACEHOLDER: Replace with the absolute protected environment-file path.
+# The manager reads this root-owned 0600 file before dropping privileges.
+# Required application keys are documented in .env.example and validated by Settings.
+# GEMINI_MODEL is not consumed by the application and must not be treated as required.
 EnvironmentFile=/TODO_REPLACE_WITH_ABSOLUTE_ENVIRONMENT_FILE
 
 # TODO / PLACEHOLDER: Replace both project paths and the virtual-environment Python path.
@@ -25,19 +30,27 @@ Environment="PYTHONDONTWRITEBYTECODE=1"
 Environment="PYTHONUNBUFFERED=1"
 ExecStart=/TODO_REPLACE_WITH_ABSOLUTE_VENV_PYTHON -m dztgbot
 
+# Deterministic recovery after non-zero exits. Operator restart uses the same unit.
 Restart=on-failure
 RestartSec=5s
 TimeoutStartSec=30s
-TimeoutStopSec=30s
+# Allow graceful stop of polling, keyed processor, gateways, and SQLite handles.
+TimeoutStopSec=45s
 KillSignal=SIGTERM
 
 # systemd creates /var/lib/dztgbot for the non-root service account.
-# TODO: Set JIRA_RULES_PATH=/var/lib/dztgbot/jira_rules.txt in the environment file.
+# Protected runtime paths that must live under this directory (mode 0700 dir / 0600 files):
+#   JIRA_RULES_PATH=/var/lib/dztgbot/jira_rules.txt
+#   WORKFLOW_DB_PATH=/var/lib/dztgbot/workflow.sqlite3
+#   USER_CREDENTIALS_PATH=/var/lib/dztgbot/user_credentials.json  (default when unset)
+# The workflow database must remain on local disk outside the Git checkout and outside
+# cloud-synced or network filesystems. See docs/operations/workflow-db-runbook.md.
 StateDirectory=dztgbot
 StateDirectoryMode=0700
 ReadWritePaths=/var/lib/dztgbot
 
-# Send application output to journald. The application must never log secrets.
+# Send application output to journald. The application must never log secrets,
+# PATs, forwarded text, generated descriptions, VPN endpoints, or private URLs.
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=dztgbot
@@ -64,8 +77,10 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
 RemoveIPC=true
 
-# The optional /vpnstart command uses narrowly scoped sudoers entries for nmcli.
-# The deployment script renders this as false only when VPN_ALLOW_START=true.
+# The optional /vpnstart command uses narrowly scoped sudoers entries for nmcli
+# load/up of one named L2TP/IPsec connection. Deployment never starts the tunnel
+# automatically. The deployment script renders NoNewPrivileges as false only when
+# VPN_ALLOW_START=true; otherwise it remains true.
 NoNewPrivileges=TODO_REPLACE_WITH_NO_NEW_PRIVILEGES
 AmbientCapabilities=
 

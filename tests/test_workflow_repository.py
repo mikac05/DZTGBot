@@ -200,6 +200,99 @@ class SQLiteWorkflowRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(durable.state, DraftState.SUBMITTING)
         self.assertEqual(durable.revision, draft.revision + 1)
 
+    async def test_aggregate_save_revision_cas_has_one_winner(self) -> None:
+        original = make_draft("draft-save-cas", with_content=True)
+        await self.repository.save(original)
+        first = replace(
+            original,
+            revision=original.revision + 1,
+            template=replace(original.template, summary="first winner"),
+            updated_at=NOW + timedelta(seconds=1),
+        )
+        second = replace(
+            original,
+            revision=original.revision + 1,
+            template=replace(original.template, summary="second winner"),
+            updated_at=NOW + timedelta(seconds=1),
+        )
+
+        outcomes = await asyncio.gather(
+            self.repository.save(first),
+            self.repository.save(second),
+            return_exceptions=True,
+        )
+        self.assertEqual(outcomes.count(None), 1)
+        conflicts = [
+            outcome
+            for outcome in outcomes
+            if isinstance(outcome, RevisionConflictError)
+        ]
+        self.assertEqual(len(conflicts), 1)
+        durable = await self.repository.get_by_id(original.draft_id)
+        assert durable is not None and durable.template is not None
+        self.assertEqual(durable.revision, original.revision + 1)
+        self.assertIn(durable.template.summary, {"first winner", "second winner"})
+
+    async def test_aggregate_save_rejects_same_stale_and_skipped_revisions(self) -> None:
+        original = make_draft("draft-save-revisions", with_content=True)
+        await self.repository.save(original)
+
+        for label, candidate in (
+            ("same", replace(original, updated_at=NOW + timedelta(seconds=1))),
+            ("stale", replace(original, revision=original.revision - 1)),
+            ("skipped", replace(original, revision=original.revision + 2)),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaises(RevisionConflictError):
+                    await self.repository.save(candidate)
+
+        self.assertEqual(await self.repository.get_by_id(original.draft_id), original)
+
+    async def test_aggregate_save_preserves_related_recovery_rows(self) -> None:
+        original = make_draft(
+            "draft-save-related", state=DraftState.SUBMITTING, with_content=True
+        )
+        await self.repository.save(original)
+        callback = build_token_record(
+            opaque_token=generate_opaque_token(),
+            draft_id=original.draft_id,
+            owner_user_id=original.owner_id,
+            chat_id=original.chat_id,
+            message_thread_id=original.message_thread_id,
+            preview_message_id=812,
+            action=CallbackAction.CONFIRM,
+            expected_revision=original.revision,
+            expected_state=original.state.value,
+            expires_at=NOW + timedelta(hours=1),
+        )
+        await self.repository.store_callback(callback)
+        attempt = SubmissionAttempt(
+            attempt_id="related-attempt",
+            draft_id=original.draft_id,
+            request_hash="related-hash",
+            attempt_number=1,
+            started_at=NOW,
+        )
+        self.assertTrue(await self.repository.claim_attempt(attempt))
+
+        updated = replace(
+            original,
+            revision=original.revision + 1,
+            template=replace(original.template, summary="updated aggregate"),
+            published_issue=None,
+            updated_at=NOW + timedelta(seconds=1),
+        )
+        await self.repository.save(updated)
+
+        self.assertEqual(await self.repository.get_callback(callback.token_hash), callback)
+        self.assertEqual(await self.repository.get_latest_attempt(original.draft_id), attempt)
+        self.assertEqual(
+            await self.repository.get_published_issue(original.draft_id),
+            original.published_issue,
+        )
+        attachments = await self.repository.list_attachments(original.draft_id)
+        self.assertEqual(attachments[0].status, AttachmentStatus.UPLOADED)
+
     async def test_submission_attempt_claim_has_one_winner_and_recovers(self) -> None:
         draft = make_draft(
             "draft-attempt", state=DraftState.SUBMITTING, revision=4
@@ -276,6 +369,61 @@ class SQLiteWorkflowRepositoryTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(outcomes.count(True), 1)
         self.assertEqual(outcomes.count(False), 1)
+
+    async def test_preview_invalidation_atomically_expires_only_active_draft_tokens(self) -> None:
+        target = make_draft("draft-invalidate")
+        other = make_draft("draft-other")
+        await self.repository.save(target)
+        await self.repository.save(other)
+
+        target_callbacks = []
+        for action in (CallbackAction.CONFIRM, CallbackAction.TOGGLE_TYPE):
+            callback = build_token_record(
+                opaque_token=generate_opaque_token(),
+                draft_id=target.draft_id,
+                owner_user_id=target.owner_id,
+                chat_id=target.chat_id,
+                message_thread_id=target.message_thread_id,
+                preview_message_id=810,
+                action=action,
+                expected_revision=target.revision,
+                expected_state=target.state.value,
+                expires_at=NOW + timedelta(hours=1),
+            )
+            target_callbacks.append(callback)
+            await self.repository.store_callback(callback)
+
+        other_callback = build_token_record(
+            opaque_token=generate_opaque_token(),
+            draft_id=other.draft_id,
+            owner_user_id=other.owner_id,
+            chat_id=other.chat_id,
+            message_thread_id=other.message_thread_id,
+            preview_message_id=811,
+            action=CallbackAction.CONFIRM,
+            expected_revision=other.revision,
+            expected_state=other.state.value,
+            expires_at=NOW + timedelta(hours=1),
+        )
+        await self.repository.store_callback(other_callback)
+
+        self.assertEqual(
+            await self.repository.invalidate_draft_preview_tokens(
+                target.draft_id, at=NOW
+            ),
+            2,
+        )
+        self.assertEqual(
+            await self.repository.invalidate_draft_preview_tokens(
+                target.draft_id, at=NOW
+            ),
+            0,
+        )
+        for callback in target_callbacks:
+            restored = await self.repository.get_callback(callback.token_hash)
+            self.assertEqual(restored.expires_at, NOW)  # type: ignore[union-attr]
+        untouched = await self.repository.get_callback(other_callback.token_hash)
+        self.assertEqual(untouched, other_callback)
 
     async def test_non_one_shot_callback_is_not_consumed(self) -> None:
         draft = make_draft("draft-toggle")
@@ -430,7 +578,13 @@ class SQLiteWorkflowRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
         loaded = await self.repository.get_by_id(draft.draft_id)
         assert loaded is not None
-        await self.repository.save(loaded)
+        await self.repository.save(
+            replace(
+                loaded,
+                revision=loaded.revision + 1,
+                updated_at=NOW + timedelta(seconds=2),
+            )
+        )
 
         restarted = SQLiteWorkflowRepository(self.database_path)
         await restarted.initialize()

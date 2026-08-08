@@ -37,8 +37,19 @@ class HandoffSafetyTests(unittest.TestCase):
             "configured GEMINI_API_KEY assignment",
             handoff._secret_findings_in_text(configured),
         )
+        source = "gateway = JiraGateway(transport)"
+        self.assertEqual(
+            handoff._secret_findings_in_text(
+                source,
+                scan_vpn_profile_assignments=False,
+            ),
+            [],
+        )
+        self.assertIn(
+            "configured gateway assignment",
+            handoff._secret_findings_in_text("gateway=private.example.invalid"),
+        )
 
 
 if __name__ == "__main__":
     unittest.main()
-

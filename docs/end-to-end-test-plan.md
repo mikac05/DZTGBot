@@ -1,64 +1,111 @@
-# End-to-end server test plan and admin command reference
+# End-to-end server test plan and operator reference
 
-This plan supports Ubuntu 24.04 only and contains no usable credentials, VPN endpoints, or Jira configuration.
+This plan supports **Ubuntu 24.04 only**. It contains no usable credentials, VPN endpoints, Jira hosts, or authenticated session data. Placeholders must be replaced only in private, root-managed locations on the target host.
+
+## 0. Evidence boundary
+
+| Activity | Allowed in this plan? |
+| --- | --- |
+| Offline unit tests / deploy preflight | Yes |
+| `systemctl` status/restart on the already-managed host during a supervised window | Yes, when the operator explicitly runs the steps |
+| Real Telegram messages with a private test bot | Yes, supervised |
+| Real Gemini analysis with a private test key | Yes, supervised |
+| Real Jira create/update/attachment | **Only** with explicit human confirmation per issue in a supervised window |
+| Automated CI or unattended scripts mutating Jira | **Never** |
+| Automatic full-tunnel VPN start | **Never** as part of install; optional `/vpnstart` only when deliberately enabled |
+
+Do not claim live validation for Telegram, Gemini, Jira, VPN, or systemd unless those steps were actually performed in the target environment.
 
 ## 1. Test boundaries
 
-- Untouched `TODO_...` values are intentionally rejected during startup.
-- A real Telegram exchange cannot be completed with a placeholder bot token. Supply a developer-owned test bot token privately through the protected environment file.
-- A Gemini success test requires a privately supplied test API key and a supported model configured on the server.
+- Untouched `TODO_...` values are intentionally rejected during startup and deploy validation.
+- Supply developer-owned test tokens/keys only through the protected environment file (`sudoedit`).
 - Never paste secrets into a command, terminal history, Telegram message, log, screenshot, or tracked file.
-- Use a dedicated test Telegram chat and placeholder Jira rules. No Jira connection or issue creation exists in this phase.
-- Keep `VPN_ALLOW_START=false` throughout the simulated VPN-down test. Do not disconnect or reconfigure the real tunnel.
+- First-release product boundaries:
+  - **Private chat only** for auth, drafts, callbacks, Jira mutations, and admin.
+  - **PAT-only** authentication (passwords/Basic/cookies rejected).
+  - **Human confirmation** before every Jira create.
+  - **Photo attachments only** after create; non-photo media is not uploaded and is not multimodally analyzed.
+- Keep `VPN_ALLOW_START=false` for simulated VPN-down tests. Do not reconfigure production tunnels casually.
+- `GEMINI_MODEL` is **not** an application setting. Do not require it in the environment file.
 
 ## 2. Server preflight
 
-Run `scripts/deploy.sh` as documented in the README before this test plan. The deployment must complete successfully and report that `dztgbot.service` is active.
+Run `scripts/deploy.sh` as documented in the README. Expected outcomes:
 
-Set shell variables to the paths and account already chosen during deployment. These values are placeholders and must be replaced locally:
+- Ubuntu 24.04 gate passes.
+- Root-owned `0600` environment file validated without printing values.
+- Non-root service account present.
+- Runtime venv built from `requirements.txt`; offline unit tests pass.
+- `WORKFLOW_DB_PATH` prepared under `/var/lib/dztgbot` with service ownership and mode `0600`.
+- Migration preflight reports the current schema version.
+- Existing DB (if any) backed up under `/var/lib/dztgbot/backups/`.
+- `dztgbot.service` reaches `active (running)`.
+
+Set local shell placeholders (not secrets):
 
 ```bash
 DZTGBOT_PROJECT_DIR=/TODO_REPLACE_WITH_ABSOLUTE_PROJECT_DIRECTORY
 DZTGBOT_VENV_PYTHON=/TODO_REPLACE_WITH_ABSOLUTE_VENV_PYTHON
 DZTGBOT_ENV_FILE=/TODO_REPLACE_WITH_ABSOLUTE_ENVIRONMENT_FILE
 DZTGBOT_SERVICE_USER=TODO_REPLACE_WITH_SERVICE_USER
+DZTGBOT_WORKFLOW_DB=/var/lib/dztgbot/workflow.sqlite3
 ```
 
-Verify the runtime without printing environment variables:
+Verify without printing environment values:
 
 ```bash
 cd "$DZTGBOT_PROJECT_DIR"
 "$DZTGBOT_VENV_PYTHON" --version
 "$DZTGBOT_VENV_PYTHON" -m pip check
 test -r requirements.txt
+test -r requirements-dev.txt
 test -r config/jira_rules.example.txt
+test -r docs/operations/workflow-db-runbook.md
+test -r docs/security/credential-threat-model.md
 sudo test -r "$DZTGBOT_ENV_FILE"
+sudo test -f "$DZTGBOT_WORKFLOW_DB"
+sudo stat -c '%a %U' "$DZTGBOT_WORKFLOW_DB"
 sudo -u "$DZTGBOT_SERVICE_USER" test -r src/dztgbot/__main__.py
+sudo -u "$DZTGBOT_SERVICE_USER" test -r "$DZTGBOT_WORKFLOW_DB"
 ```
 
-Expected results:
+Expected:
 
-- Python reports version 3.12.x.
-- `pip check` reports no broken requirements.
-- Every `test` command exits successfully and prints nothing.
+- Python 3.12.x
+- `pip check` clean for the **runtime** venv
+- Workflow DB mode `600` owned by the service user
+- All `test` commands succeed silently
 
-Check for unresolved required placeholders without printing configured secret values:
+Check unresolved required placeholders without printing secrets:
 
 ```bash
 sudo awk -F= '$2 ~ /^TODO_/ {print $1 "=<unresolved>"}' "$DZTGBOT_ENV_FILE"
 ```
 
-Before an actual Telegram test, the command must not report unresolved values for:
+Before a live Telegram/Jira window, these must **not** appear unresolved:
 
 - `TELEGRAM_BOT_TOKEN`
 - `GEMINI_API_KEY`
-- `GEMINI_MODEL`
 - `TELEGRAM_ADMIN_USER_IDS`
 - `JIRA_RULES_PATH`
+- `JIRA_URL`
+- `WORKFLOW_DB_PATH`
 
-## 3. Verify placeholder fail-fast behaviour
+`GEMINI_MODEL` must not be required. If present as a leftover key, it is ignored by the application.
 
-This check uses the tracked example only and does not contact Telegram or Gemini:
+### Quality-tool truthfulness
+
+| Gate | Where it runs | Command family |
+| --- | --- | --- |
+| Runtime deps + offline unittest | Deploy + local | `requirements.txt`, `python -m unittest discover` |
+| Ruff / Mypy / coverage / ShellCheck | CI / developer workstation | `requirements-dev.txt`, `.github/workflows/quality.yml` |
+
+Deploy does **not** install ruff/mypy/coverage into the production venv. CI does **not** run `scripts/deploy.sh` against a live host and does **not** mutate Jira.
+
+## 3. Placeholder fail-fast
+
+Uses the tracked example only; does not contact Telegram, Gemini, or Jira:
 
 ```bash
 cd "$DZTGBOT_PROJECT_DIR"
@@ -67,36 +114,51 @@ chmod 0600 .env
 PYTHONPATH=src "$DZTGBOT_VENV_PYTHON" -m dztgbot
 ```
 
-Expected result:
+Expected:
 
-- Startup stops immediately with a configuration error stating that `TELEGRAM_BOT_TOKEN` must be supplied.
+- Startup fails because `TELEGRAM_BOT_TOKEN` (and/or other required values) remain placeholders.
 - No network service remains running.
-- The `.env` file remains ignored by Git.
+- `.env` stays Git-ignored.
 
-Remove the local placeholder copy before testing the systemd environment, so it cannot cause confusion:
+Remove the local copy before systemd tests:
 
 ```bash
 rm .env
 ```
 
-## 4. Prepare private test configuration
-
-Edit the protected server file interactively:
+## 4. Private test configuration checklist
 
 ```bash
 sudoedit "$DZTGBOT_ENV_FILE"
 ```
 
-Use this key-only checklist. Replace required placeholders inside the protected file; do not copy the completed file into the repository:
+Key-only checklist (replace values only inside the protected file):
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=TODO_SUPPLY_PRIVATE_TEST_BOT_TOKEN_ON_SERVER
 GEMINI_API_KEY=TODO_SUPPLY_PRIVATE_TEST_GEMINI_KEY_ON_SERVER
-GEMINI_MODEL=TODO_SUPPLY_SUPPORTED_MODEL_ON_SERVER
 GEMINI_TIMEOUT_SECONDS=30
 TELEGRAM_ADMIN_USER_IDS=TODO_SUPPLY_AUTHORISED_NUMERIC_USER_IDS_ON_SERVER
 TELEGRAM_CONCURRENT_UPDATES=4
+# TELEGRAM_ALLOWED_USER_IDS=
 JIRA_RULES_PATH=/var/lib/dztgbot/jira_rules.txt
+WORKFLOW_DB_PATH=/var/lib/dztgbot/workflow.sqlite3
+JIRA_URL=TODO_SUPPLY_HTTPS_JIRA_BASE_URL_ON_SERVER
+JIRA_VERIFY_SSL=true
+# JIRA_CA_BUNDLE_PATH=
+# JIRA_DEFAULT_PROJECT_KEY=
+# USER_CREDENTIALS_PATH=
+AUTH_TTL_SECONDS=180
+AUTH_PAT_ONLY=true
+PRIVATE_CHAT_ONLY=true
+MAX_BATCH_MESSAGES=20
+MAX_MESSAGE_CHARACTERS=8000
+MAX_PROMPT_CHARACTERS=32000
+MAX_ATTACHMENT_BYTES=10485760
+MAX_ATTACHMENT_COUNT=10
+MAX_QUEUE_SIZE=100
+MAX_CONCURRENT_GEMINI=2
+MAX_CONCURRENT_JIRA=4
 VPN_ENABLED=false
 VPN_CONNECTION_NAME=TODO_SUPPLY_PRIVATE_CONNECTION_NAME_WHEN_VPN_IS_ENABLED
 VPN_PROFILE_PATH=TODO_SUPPLY_PRIVATE_ABSOLUTE_PROFILE_PATH_WHEN_VPN_IS_ENABLED
@@ -107,7 +169,7 @@ VPN_COMMAND_TIMEOUT_SECONDS=10
 LOG_LEVEL=INFO
 ```
 
-Seed placeholder-only rules if the runtime file is not already present:
+Seed rules if needed:
 
 ```bash
 sudo install \
@@ -118,295 +180,235 @@ sudo install \
   /var/lib/dztgbot/jira_rules.txt
 ```
 
-If the service group differs from the service user, replace the `-g` value with the configured service group.
-
 ## 5. Start and observe the service
 
 ```bash
 sudo systemctl restart dztgbot.service
 sudo systemctl status dztgbot.service --no-pager
-sudo journalctl -u dztgbot.service -n 50 --no-pager
+sudo journalctl -u dztgbot.service -n 80 --no-pager
 ```
 
-Expected result:
+Expected:
 
-- The service state is `active (running)`.
-- The journal contains `DZTGBot is running`.
-- The journal contains an initial VPN state but no token, key, forwarded text, generated description, VPN endpoint, or VPN credential.
+- State `active (running)`.
+- Journal contains a running banner (composition-root startup).
+- Journal may include initial VPN state enum/text without endpoints or secrets.
+- No token, PAT, forwarded body, generated description, or private URL appears.
 
-Follow logs during each test in a second terminal:
+Follow logs:
 
 ```bash
 sudo journalctl -u dztgbot.service -f
 ```
 
-## 6. Telegram intake tests
+Workflow DB recovery and restart notes: [`docs/operations/workflow-db-runbook.md`](operations/workflow-db-runbook.md).
 
-### 6.1 Ordinary-message rejection
+## 6. Auth, privacy, and allowlist
 
-1. Open the test bot chat using a Telegram client.
-2. Send a new ordinary text message that is not forwarded and is not a reply to a forwarded message.
+### 6.1 Private PAT auth happy path
 
-Expected result:
+1. Open a **private** chat with the test bot.
+2. Send `/start` then `/auth`.
+3. Send a disposable test PAT only if this host may contact the real Jira (supervised).
+4. Confirm the bot deletes the credential message when permitted.
+5. Confirm local success messaging without echoing the PAT.
 
-- The bot sends no reply.
-- No Gemini request is made.
+### 6.2 Reject non-PAT shapes
 
-### 6.2 Simulate a direct forwarded message
+In `/auth`, try non-secret synthetic shapes (not real passwords), for example an obvious `user:password` form. Expected: rejection, no store, conversation remains safe or ends per TTL rules.
 
-1. Create a harmless placeholder message in a separate test chat or Saved Messages.
-2. Use Telegram's **Forward** action to forward that message to the bot.
-3. Do not copy and paste the text; copied text is an ordinary message and must be ignored.
+### 6.3 Auth TTL
 
-The bot accepts the message when Telegram supplies `forward_origin`, including when Telegram hides part of the original sender identity.
+Start `/auth`, wait longer than `AUTH_TTL_SECONDS`, then send text. Expected: late input is not accepted as a credential; user is told to restart `/auth`.
 
-### 6.3 Simulate a reply containing a forward
+### 6.4 Group / non-private refusal
 
-1. Forward a harmless placeholder message to the bot.
-2. Reply directly to that forwarded message with an ordinary text reply.
+From a group: `/auth`, `/new`, forward a message, press an old callback if available, `/rules`. Expected: private-only warnings or non-disclosing redirects; **no** rules body, auth status, or Jira mutation.
 
-Expected result:
+### 6.5 Unauthorised admin
 
-- Both the direct forward and the direct reply to that forward are accepted.
-- For the reply case, analysis uses the forwarded message's sender, chat, text or caption, and media type—not the reply text.
-- Replies to ordinary non-forwarded messages are ignored.
+From a non-admin private account, run `/rules`. Expected: fixed unauthorised message; no rules disclosure.
 
-## 7. Expected result scenarios
+## 7. Intake, media, and analysis
 
-### 7.1 Gemini success while VPN support is disabled
+### 7.1 Ordinary message
 
-Configuration:
+Send ordinary non-forward text outside edit mode. Expected: no analysis (or only documented help/menu behaviour); no Jira call.
 
-```dotenv
-VPN_ENABLED=false
-VPN_ALLOW_START=false
-```
+### 7.2 Direct forward
 
-Send a direct forward.
+Forward a harmless placeholder message. Expected progress toward analysis and a durable review preview (HTML), with draft controls bound to callback tokens—not bare action names.
 
-Expected Telegram replies, in order:
+### 7.3 Reply-to-forward
 
-```text
-Forward received. Analyzing...
-```
+Reply to a forward; analysis uses the forward content, not the reply text alone.
 
-```text
-The VPN tunnel is unavailable, so Jira is temporarily unreachable. I will still prepare the task preview.
-```
+### 7.4 Batching
 
-Then a preview with this structure:
+Forward several messages quickly in the same private chat. Expected: bounded batch (config `MAX_BATCH_MESSAGES`) and one preview for the sealed batch.
 
-```text
-Jira task preview (not created)
+### 7.5 Media boundaries
 
-Summary: <generated value>
-Issue type: <generated value>
-Priority: <generated value>
-Project: <generated value or Not assigned>
-Assignee: <generated value or Not assigned>
-Labels: <generated values or None>
-Components: <generated values or None>
+| Case | Expected |
+| --- | --- |
+| Photo with caption | Caption participates in analysis; photo eligible for post-create attach |
+| Captionless photo | Limited analysis signal; user understands model did not “see” pixels |
+| Document / video / voice | Not multimodal; **not** uploaded as Jira attachments in this release |
+| Oversized photo | Rejected by configured byte bound |
 
-Description:
-<generated value>
+### 7.6 Gemini failure (safe invalid key)
 
-Acceptance criteria:
-- <generated value>
-```
-
-Verification:
-
-- The preview is review-only and explicitly says `not created`.
-- No Jira request is made.
-- The preview is limited to 4,000 Telegram characters.
-
-### 7.2 Full success with an already-active VPN
-
-Perform this only after the private L2TP/IPsec profile has been console-tested and the tunnel is already active. Do not start the full tunnel solely for this test.
-
-Configuration:
-
-```dotenv
-VPN_ENABLED=true
-VPN_CONNECTION_NAME=TODO_SUPPLY_PRIVATE_ACTIVE_CONNECTION_NAME_ON_SERVER
-VPN_PROFILE_PATH=TODO_SUPPLY_PRIVATE_ABSOLUTE_PROFILE_PATH_ON_SERVER
-VPN_ALLOW_START=false
-```
-
-Restart the service and have an authorised administrator send `/vpn`. It must reply:
-
-```text
-L2TP/IPsec VPN tunnel is up.
-```
-
-Send a direct forward.
-
-Expected Telegram replies:
-
-1. `Forward received. Analyzing...`
-2. The human-readable Jira preview.
-
-The temporary Jira-unreachable warning must not appear.
-
-### 7.3 Deterministic Gemini-failure test
-
-Keep the private Telegram test token configured. Temporarily replace only the Gemini key in the protected environment file with this explicitly invalid, non-secret test value:
+Temporarily set a non-secret invalid key:
 
 ```dotenv
 GEMINI_API_KEY=TEST_ONLY_INVALID_GEMINI_KEY
 ```
 
-Restart and send a direct forward:
+Restart, forward once, expect a safe user-facing failure and journal error **type** without body/PAT. Restore the real test key afterward.
 
-```bash
-sudo systemctl restart dztgbot.service
-```
+## 8. Draft controls (no Jira mutation required)
 
-Expected Telegram replies:
+On a review preview:
 
-1. `Forward received. Analyzing...`
-2. The Jira-unreachable warning if the VPN is disabled or down.
-3. `Gemini analysis failed or returned an invalid result. Please try again later.`
+1. Toggle issue type and priority — preview updates; state remains review.
+2. Edit flow — returns to review with revised template fields.
+3. Cancel — terminal cancelled state; buttons stop working (token one-shot / state checks).
+4. Stale callback — old message button after cancel/new draft is denied without mutating another draft.
 
-Expected logging:
+Restart the service mid-review and confirm the draft still exists (SQLite durability) per the runbook restart section.
 
-- The journal records `Gemini analysis failed` and an exception type.
-- The forwarded text and credentials are not logged.
+## 9. Supervised Jira create / update / attach / reconcile
 
-Restore the private test Gemini key using `sudoedit`, then restart the service. Do not leave the invalid test value deployed.
+**Stop here unless a human explicitly approves live Jira mutations in a test project.**
 
-### 7.4 Safe VPN-down simulation
+### 9.1 Create with confirmation
 
-Do not stop the real VPN. Temporarily configure a deliberately nonexistent test connection:
+1. Authenticate with a PAT that can create issues in the designated **test** project only.
+2. Ensure VPN policy matches the environment (`VPN_ENABLED` and an already-validated tunnel if required). Do not auto-start full tunnel from deploy.
+3. Produce a review preview from forward or `/new`.
+4. Press **confirm** once.
+5. Expected: submitting progress; on success, published card with issue key/title/link controls.
+6. Confirm the draft is no longer freely re-creatable via the same token.
 
-```dotenv
-VPN_ENABLED=true
-VPN_CONNECTION_NAME=TEST_ONLY_MISSING_VPN_CONNECTION
-VPN_PROFILE_PATH=/TEST_ONLY_MISSING_VPN_PROFILE.nmconnection
-VPN_ALLOW_START=false
-```
+### 9.2 Attachment (photo only)
 
-Restart the service:
+Include a small photo in the draft path. After create, expect attach state transitions; partial failure should surface without inventing a new issue.
 
-```bash
-sudo systemctl restart dztgbot.service
-```
+### 9.3 Retryable failure
 
-Expected administrator `/vpn` reply:
+Induce a safe permission or validation failure against the test project. Expected: draft retained in a retryable state with retry/cancel—not silent loss.
 
-```text
-L2TP/IPsec VPN tunnel is down.
-```
+### 9.4 Unknown create outcome (reconciliation)
 
-Expected administrator `/vpnstart` reply:
+Only in a controlled test: force an ambiguous timeout if operable in that environment, **or** rehearse operator steps using the runbook against a draft already in `SUBMISSION_UNKNOWN` from offline fixtures. Expected:
 
-```text
-L2TP/IPsec VPN tunnel is down and remote start is disabled.
-```
+- No automatic second create.
+- Reconcile control searches/binds existing issue or marks not-created before retry is allowed.
 
-Expected forwarded-message flow:
+### 9.5 Published update
 
-1. `Forward received. Analyzing...`
-2. `The VPN tunnel is unavailable, so Jira is temporarily unreachable. I will still prepare the task preview.`
-3. A Jira preview when Gemini succeeds, or the Gemini failure message when it does not.
+Edit a just-created test issue through the bot. Expected: diff-based update path; unknown update outcomes require reconciliation rather than blind re-PUT storms.
 
-This verifies that a VPN outage does not block the Telegram handler or Gemini preview. Restore the intended private VPN settings with `sudoedit`, then restart the service.
+### 9.6 Keyed concurrency (supervised)
 
-## 8. Admin authorisation test
+With `TELEGRAM_CONCURRENT_UPDATES>1`, operate two private workflows for the same user (or two users). Expected: progress remains isolated; global concurrency never exceeds configured Gemini/Jira limits (observe offline metrics tests + qualitative live behaviour).
 
-1. From a Telegram account whose numeric ID is listed in `TELEGRAM_ADMIN_USER_IDS`, run each command in the reference below.
-2. From an account whose numeric ID is not listed, run one admin command.
+## 10. Admin command reference
 
-Expected reply for every admin command sent by an unauthorised account:
-
-```text
-You are not authorised to manage this bot.
-```
-
-The unauthorised request must not read or change rules and must not start the VPN.
-
-## 9. Final admin command reference
-
-Only the numeric Telegram user IDs in `TELEGRAM_ADMIN_USER_IDS` may use these commands.
+Only numeric IDs in `TELEGRAM_ADMIN_USER_IDS`, and only in **private** chat.
 
 ### `/rules`
 
-- Loads the current rules file, using the in-memory last-known-good rules if an external reload fails.
-- Replies first with `Current runtime Jira rules:` followed by the current rules text.
-- Long rules are split into messages of at most 3,500 characters per chunk.
-- Does not modify the rules.
+- Shows current runtime rules (chunked).
+- Never dumps rules in groups.
 
-### `/setrules <new rules>`
+### `/setrules`
 
-- Takes all non-empty text after the command as the replacement rules.
-- Strips leading and trailing whitespace.
-- Rejects a missing or whitespace-only value with:
-
-```text
-Provide non-empty rules after /setrules, or reply with /setrules to a text message.
-```
-
-- Atomically saves the current rules as the previous version, writes the new rules, reads them back, and activates them immediately without restarting the bot.
-- On success replies:
-
-```text
-Rules updated and reloaded. The new rules are active now.
-```
-
-- If saving or validation fails, restores or retains the previous rules and replies:
-
-```text
-Rules update failed. The previous rules remain active.
-```
-
-### `/setrules` as a reply
-
-- When `/setrules` has no inline value, it accepts the text or caption of the Telegram message being replied to.
-- Behaviour, validation, backup, hot reload, and replies are otherwise identical to `/setrules <new rules>`.
-- It does not accept non-text/non-caption media as rules.
+- Inline text or reply-to text/caption.
+- Atomic replace with previous retention; failure keeps prior rules.
 
 ### `/vpn`
 
-- Performs a read-only NetworkManager status check for the configured connection.
-- Never displays the VPN endpoint, username, password, pre-shared key, profile contents, or command error output.
-- Possible exact replies are:
-
-```text
-L2TP/IPsec VPN support is disabled.
-L2TP/IPsec VPN tunnel is up.
-L2TP/IPsec VPN tunnel is down.
-L2TP/IPsec VPN status could not be checked.
-```
+- Read-only status. Never prints endpoints, PSK, username, password, or command stderr.
 
 ### `/vpnstart`
 
-- Serialises concurrent start requests with an async lock.
-- Returns immediately if the configured tunnel is already active or VPN support is disabled.
-- Refuses startup when `VPN_ALLOW_START=false`.
-- The root deployment gate requires the private profile to be a root-owned, regular, non-symlink file with mode `0600` in a root-managed directory.
-- Uses non-interactive, narrowly authorised `sudo nmcli` commands to load the profile and activate the configured connection.
-- Never returns command output or VPN secrets.
-- Possible exact replies are:
+- Disabled when `VPN_ALLOW_START=false`.
+- When enabled, uses narrow sudoers for exact `nmcli connection load <profile>` and `nmcli connection up <name>` only.
+- Never returns secret material.
 
-```text
-L2TP/IPsec VPN support is disabled.
-L2TP/IPsec VPN tunnel is up.
-L2TP/IPsec VPN tunnel is down and remote start is disabled.
-The private VPN profile could not be loaded.
-L2TP/IPsec VPN tunnel could not be started.
-L2TP/IPsec VPN tunnel is down.
-L2TP/IPsec VPN status could not be checked.
+## 11. VPN scenarios (non-destructive defaults)
+
+### 11.1 VPN disabled
+
+`VPN_ENABLED=false`. Admin `/vpn` reports support disabled. Preview analysis can still proceed; Jira may fail later without connectivity.
+
+### 11.2 VPN-down simulation (no real disconnect)
+
+Point `VPN_CONNECTION_NAME` at a nonexistent test name with `VPN_ALLOW_START=false`, restart, check `/vpn` and `/vpnstart` safe messages, restore real settings afterward.
+
+### 11.3 Already-active tunnel
+
+Only after console validation. `/vpn` reports up. Do not start full tunnel solely because deploy ran.
+
+## 12. Workflow DB operator checks (no content dump)
+
+```bash
+# Integrity (read-only)
+sudo -u "$DZTGBOT_SERVICE_USER" "$DZTGBOT_VENV_PYTHON" - <<'PY'
+import os, sqlite3
+from pathlib import Path
+path = Path(os.environ.get("DZTGBOT_WORKFLOW_DB", "/var/lib/dztgbot/workflow.sqlite3"))
+# Prefer exporting DZTGBOT_WORKFLOW_DB in the shell to the configured path.
+conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+print(conn.execute("PRAGMA integrity_check").fetchone()[0])
+print("journal_mode", conn.execute("PRAGMA journal_mode").fetchone()[0])
+conn.close()
+PY
 ```
 
-## 10. Completion checklist
+If integrity is not `ok`, stop the service and follow [`docs/operations/workflow-db-runbook.md`](operations/workflow-db-runbook.md). Do not print row payloads (they may contain operational metadata).
 
-- Ordinary messages receive no reply.
-- Direct forwards and replies directly containing a forward are accepted.
-- Gemini success produces a strict Jira preview and never creates a Jira issue.
-- Gemini failure produces the documented user-facing error and a journal error without sensitive content.
-- VPN-down simulation produces the Jira-unreachable warning while the bot remains responsive.
-- All admin commands reject an unauthorised Telegram user ID.
-- Rules update without a process restart and retain the previous version on failure.
-- `systemctl status dztgbot.service` remains healthy after tests.
-- Temporary invalid Gemini and nonexistent VPN test values are removed from the protected environment file.
-- No `.env`, `.nmconnection`, XML VPN profile, credential, token, endpoint, or private rules file is staged in Git.
+## 13. Completion checklist
+
+- [ ] Deploy active on Ubuntu 24.04; workflow DB `0600` under `/var/lib/dztgbot`
+- [ ] Placeholder fail-fast confirmed
+- [ ] Private PAT auth, TTL, and non-PAT rejection confirmed
+- [ ] Group/non-private paths do not disclose rules or mutate Jira
+- [ ] Forward / reply-to-forward / batch / media boundary behaviours match §7
+- [ ] Draft controls + stale callbacks safe without Jira
+- [ ] Supervised create/update/attach/reconcile executed only with human approval
+- [ ] Unknown-outcome path never blind-duplicates creates
+- [ ] Admin authz private-only
+- [ ] VPN tests did not unsupervised-start full tunnel
+- [ ] Journal shows no secrets or message bodies
+- [ ] Temporary invalid Gemini / fake VPN values restored
+- [ ] No `.env`, `.nmconnection`, VPN XML, PAT, or private rules staged in Git
+- [ ] Residual live items not executed are listed as unverified (not claimed green)
+
+## 14. Residual external verification (default unproven)
+
+Until a named supervised session records otherwise, treat as **unverified externally**:
+
+- BotFather production token behaviour and webhook-free polling stability under real load
+- Gemini quota/fallback on the operator’s Google project
+- Jira Server/Data Center field configuration, permissions, and attachment size policy
+- NetworkManager L2TP/IPsec full-tunnel recovery and split routing to Telegram/Gemini
+- systemd restart under host OOM / disk-full conditions
+- Backup restore drill on the production volume
+
+## 15. Audit weakness coverage (E2E focus)
+
+Maps high-risk review themes to plan sections (implementation claimed only where offline code/tests exist; live columns require §9–§11 execution):
+
+| Review theme | Offline/unit | This plan section |
+| --- | --- | --- |
+| Durable draft + callback identity | Yes | §8 |
+| FSM + unknown submission | Yes | §9.4, runbook |
+| Keyed concurrency | Yes | §9.6 |
+| PAT-only / TTL / private | Yes | §6 |
+| Media honesty | Partial UX | §7.5 |
+| Mutation recovery | Yes | §9.3–§9.5 |
+| Docs / deploy drift | P8-G docs | §2, README |
+| Credential at-rest boundary | Host `0600` | threat model doc |
+| Live multi-tenant proof | No | Residual §14 |

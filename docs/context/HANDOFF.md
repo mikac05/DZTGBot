@@ -2,50 +2,62 @@
 
 ## Current objective
 
-Complete the DZTGBot multi-agent architectural remediation program ([`MASTER_PLAN.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/MASTER_PLAN.md)) to transition the bot from a serial-use pilot to a production-safe, single-host Telegram bot for Taiwan team Jira management.
+The multi-agent remediation program in `MASTER_PLAN.md` is complete through Phase 9 in the current uncommitted working tree. The remaining objective is supervised Ubuntu 24.04 and live-service validation under separate authorization; the service remains pilot-only until that evidence exists.
 
-Success means domain isolation, explicit FSM transitions, cryptographic callback tokens, SQLite WAL workflow persistence, copy-on-write credential storage, pure application services, failure-preserving Jira mutations, and comprehensive unit test suites are fully implemented and verified without secrets or unverified live claims.
+Success for the completed offline program means domain isolation, explicit FSM transitions, cryptographic bound callbacks, SQLite WAL persistence, copy-on-write credentials, pure application services, failure-preserving Jira mutations, keyed bounded concurrency, privacy-safe observability, reproducible quality gates, truthful operations documentation, and aligned release evidence. Those gates are implemented and passing offline.
 
 ## Completed
 
-- **Phase 0 (Contracts & Characterization)**: Created system architecture contracts ([`docs/architecture/workflow-contracts.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/docs/architecture/workflow-contracts.md), [`docs/architecture/dependency-rules.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/docs/architecture/dependency-rules.md)), characterization harness, and security baseline tests.
-- **Phase 1 (Domain, FSM & Callback Policy)**: Implemented canonical domain entities ([`src/dztgbot/domain/models.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/models.py)), state machine FSM ([`src/dztgbot/domain/fsm.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/fsm.py)), callback token grammar ([`src/dztgbot/domain/callbacks.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/callbacks.py)), security policy ([`src/dztgbot/domain/policy.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/policy.py)), domain error taxonomy ([`src/dztgbot/domain/errors.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/errors.py)), and pure domain protocols ([`src/dztgbot/domain/ports.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/domain/ports.py)).
-- **Phase 2 (Durable Persistence & Credential Hardening)**: Implemented SQLite workflow repository ([`src/dztgbot/infrastructure/persistence/workflow_sqlite.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/infrastructure/persistence/workflow_sqlite.py)) with WAL mode, versioned migrations, SHA-256 token hashing, one-winner CAS transitions, and attempt claims. Implemented copy-on-write persistence and corruption recovery in `UserStore` ([`src/dztgbot/user_store.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/user_store.py)).
-- **Phase 3 (Pure Application Services)**: Implemented `WorkflowService` ([`src/dztgbot/services/workflow_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/workflow_service.py)), `ConnectivityService` ([`src/dztgbot/services/connectivity_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/connectivity_service.py)), `IntakeService` ([`src/dztgbot/services/intake_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/intake_service.py)), and `CallbackService` ([`src/dztgbot/services/callback_service.py`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/src/dztgbot/services/callback_service.py)).
+- **Phases 0–3:** contracts, canonical domain/FSM/security policy, durable SQLite and credential persistence, and pure application services.
+- **Phase 4:** lifecycle-managed Jira/Gemini gateways, canonical payloads, request-local PATs, durable attempts, ambiguous-outcome reconciliation, attachment retry, rules caching, provider boundaries, and strict configuration.
+- **Phase 5:** thin HTML Telegram UI, strict bound callback keyboards, PAT-only private auth/admin, and non-authoritative legacy facades.
+- **Phase 6:** composition-root cutover to SQLite-only workflow authority, deterministic startup/shutdown, integrated restart/recovery/concurrency/security matrices, strict current+1 aggregate CAS, and removal of legacy workflow keys/unbound callbacks/raw tasks.
+- **Phase 7:** keyed workflow/collection processing, concurrency-one fallback, global/per-actor resource bounds, queue/deadline/retry/cooldown controls, and opaque privacy-safe metrics.
+- **Phase 8:** pinned runtime/dev dependencies, Ruff, strict mypy, focused branch coverage, Ubuntu 24.04 CI, deployment/database hardening, current architecture/migration records, workflow DB runbook, credential threat model, and full audit reconciliation.
+- **Phase 9:** architecture, performance/recovery, and security release-verification reports with matching evidence identity and external validation boundary.
+
+Key changed areas include `src/dztgbot/domain/`, `src/dztgbot/services/`, `src/dztgbot/infrastructure/`, `src/dztgbot/ui/`, `src/dztgbot/__main__.py`, `src/dztgbot/config.py`, auth/admin/facades, deployment assets, quality configuration, operations/security/architecture documentation, and comprehensive offline tests.
 
 ## Decisions
 
-- Master plan [`MASTER_PLAN.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/MASTER_PLAN.md) ratified as the authoritative multi-agent remediation specification.
-- First release is private-chat-only for authentication, drafts, callbacks, Jira mutations, and admin commands.
-- Authentication is Jira PAT-only. Passwords and session cookies are rejected.
-- Workflow, callback, attempt, attachment, and published issue state are persisted in SQLite WAL database outside Git checkout.
-- Callback tokens use `j1:<action>:<token>` format with 128-bit random tokens; only SHA-256 token hashes are stored in SQLite.
-- Ambiguous create timeouts transition drafts to `SUBMISSION_UNKNOWN` state, requiring human reconciliation before any retry.
+- First safe release remains private-chat-only and PAT-only.
+- SQLite on a protected local runtime filesystem is the sole workflow/callback/attempt/attachment/published authority.
+- Existing aggregates update only through atomic current-revision-plus-one CAS; same, stale, skipped, or concurrent-loser revisions fail closed.
+- Jira create unknown outcomes never blind-retry and require positive reconciliation.
+- Callback possession alone is insufficient; actor, chat/thread, preview message, action, state, revision, expiry, and one-shot status are checked.
+- Keyed concurrency is optional and bounded; validated concurrency one remains the fallback.
+- Credential encryption remains explicitly deferred pending a separately approved external key lifecycle and vetted AEAD/rotation/backup/rollback design.
+- Automated checks remain offline and never mutate real Telegram, Gemini, Jira, VPN, systemd, or server state.
 
 ## Open items
 
-- Phase 4 (Provider Gateways and Mutation Recovery) is ready for execution.
-- Phase 5 (Telegram UI & Presentation Cutover) to follow Phase 4.
-- Phase 6 (Composition-Root Cutover) to wire new architecture into `__main__.py` and retire legacy authority in `core.py`.
-- Live service verification against Telegram BotFather, Gemini API, self-hosted Jira Data Center, and NetworkManager L2TP/IPsec VPN remains to be authorized and performed in the target environment.
+- ShellCheck/Ubuntu 24.04 CI has not run on this Windows host, although Git-Bash syntax validation passed.
+- Jira Server/Data Center support for the stable create marker must be confirmed before live use.
+- Target-host DB permissions, migration, backup/restore, disk-full, corruption, and restart behavior require supervised validation.
+- Telegram, Gemini, Jira create/update/attachment/reconciliation, NetworkManager L2TP/IPsec, systemd, and journald privacy remain externally unverified.
+- Group workflows, multimodal Gemini media bytes, horizontal deployment, and credential encryption remain explicitly deferred.
 
 ## Exact next action
 
-On the target computer, execute `DZTGBot continue`, verify 212 tests pass, and begin **Phase 4: Provider Gateways and Mutation Recovery** following the prompts and run order detailed in [`docs/context/CONTINUE_HERE.md`](file:///c:/Users/mikal/OneDrive/Others/DZTGBot/docs/context/CONTINUE_HERE.md).
+Keep the service pilot-only. With explicit target-environment authorization, execute the supervised sequence in `docs/end-to-end-test-plan.md` and `docs/operations/workflow-db-runbook.md`, beginning with Ubuntu 24.04 CI/ShellCheck and deployment preflight before external API or VPN actions.
+
+If cross-account/device synchronization is desired first, explicitly issue `DZTGBot handoff`. This run did not commit or push.
 
 ## Verification
 
-- 212/212 offline unit tests PASSED in 0.858s.
-- Zero file collisions across multi-agent ownership maps.
-- Secret safety and boundary validation passed before synchronization.
+- Full offline suite: **449 tests run; 448 passed, 1 Windows-only platform skip**.
+- Ruff, strict mypy (29 gated files), `pip check`, compilation, Git-Bash deploy syntax, and diff checks passed.
+- Focused branch coverage: **91%** for FSM/callback/security and **77%** for repository/submission.
+- Recovery/concurrency/resource matrix: 44 tests repeated three times, all 132 executions passed.
+- Phase 9 reports agree on base HEAD `03499594a4f8975ae046fa513c9aada7e1c836b6`, uncommitted remediation state, environment, counts, skip, residual risk, and external evidence boundary.
 
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-07T16:47:50Z`
+- Generated UTC: `2026-08-08T05:11:04Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `353973a7ccc6`
-- Working-tree entries before metadata refresh: `32`
+- Base commit before this handoff: `03499594a4f8`
+- Working-tree entries before metadata refresh: `77`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->

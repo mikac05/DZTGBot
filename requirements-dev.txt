@@ -1,0 +1,7 @@
+# Install this file for local quality checks and CI. It includes the deliberately
+# pinned runtime release set without mixing quality tools into production installs.
+-r requirements.txt
+
+ruff==0.11.0  # Deterministic lint engine; upgrade with configuration review.
+mypy==1.15.0  # Authoritative strict type checker for the new architecture.
+coverage==7.6.12  # Branch-aware coverage for the focused safety gates.

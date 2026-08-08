@@ -2,41 +2,43 @@
 
 ## Purpose and boundary
 
-DZTGBot is a long-running Python 3.12 Telegram bot intended for a privately managed Ubuntu 24.04 server. It accepts direct forwards, replies to forwards, and manual drafts; asks Gemini for a structured Jira task template; presents a human-reviewable Telegram preview; and creates or updates issues in a self-hosted Jira Server / Data Center instance behind NetworkManager L2TP/IPsec using per-user credentials.
+DZTGBot is a long-running Python 3.12 Telegram bot intended for a privately managed Ubuntu 24.04 server. It accepts direct forwards, replies to forwards, and manual drafts; asks Gemini for a strictly validated Jira task template; presents a human-reviewable Telegram preview; and creates or updates issues in a self-hosted Jira Server / Data Center instance behind NetworkManager L2TP/IPsec using per-user Jira Personal Access Tokens.
+
+The first safe release is private-chat-only. Every Jira create or update requires explicit human confirmation. Automated tests never perform real external mutations.
 
 ## Current architecture
 
-- `src/dztgbot/domain/`: canonical domain models (`Draft`, `JiraTaskTemplate`, `SourceMessageRef`, `Attachment`, `SubmissionAttempt`, `PublishedIssue`), `DraftState` state machine, callback token grammar (`j1:<action>:<token>`), typed error taxonomy (`DomainError`), security policy, and pure Python domain protocols (`DraftRepositoryPort`, `UserRepositoryPort`, `RulesRepositoryPort`, `AIAnalyzerPort`, `JiraGatewayPort`, `VpnManagerPort`, `TaskSchedulerPort`, `ClockPort`, `IdGeneratorPort`, `RendererPort`).
-- `src/dztgbot/services/`: pure application use cases (`WorkflowService` for manual draft creation, template edits, issue type/priority toggling, cancellation, and expiration; `ConnectivityService` for lazy VPN checks with single-flight locking and positive-status TTL caching; `IntakeService` for workflow-scoped message collection and batching; `CallbackService` for callback token verification and authorization).
-- `src/dztgbot/infrastructure/persistence/`: SQLite workflow repository (`SQLiteWorkflowRepository`), versioned schema migrations (`001_initial.sql`, `002_indexes.sql`), SHA-256 callback token hashing, atomic one-winner compare-and-swap (CAS) state transitions, and submission attempt claims.
-- `src/dztgbot/user_store.py`: atomic copy-on-write storage for per-user Jira credentials (PATs) with corruption quarantine and mode `0600` file permissions.
-- `src/dztgbot/rules.py`: atomic disk-backed rules with hot reload and a last-known-good fallback.
-- `src/dztgbot/admin.py`: numeric-ID-restricted `/rules`, `/setrules`, `/vpn`, and `/vpnstart` commands.
-- `src/dztgbot/vpn.py`: read-only status and optional narrowly authorized start for one NetworkManager L2TP/IPsec connection.
-- `src/dztgbot/config.py`: environment-only configuration validation including `JIRA_URL`, `JIRA_VERIFY_SSL`, `JIRA_DEFAULT_PROJECT_KEY`, and `USER_CREDENTIALS_PATH`.
-- `src/dztgbot/core.py`: legacy Telegram bot handlers (to be refactored into thin presentation handlers in Phase 5 & 6).
-- `src/dztgbot/__main__.py`: async entry point and global error handler.
-- `scripts/deploy.sh`: rerunnable Ubuntu 24.04-only deployment gate.
-- `deploy/systemd/dztgbot.service`: non-root, journald-backed, hardened long-running service template.
-- `tests/`: 212 offline unit tests covering domain models, FSM transitions, callback security, error classifications, SQLite migrations & repository, UserStore copy-on-write, WorkflowService, ConnectivityService, intake service, callback authorization, VPN, and privacy-safe logging.
-- `scripts/handoff.py`: cross-account/device context validation and safe Git synchronization.
+- `src/dztgbot/domain/`: frozen domain entities, full `DraftState` FSM, typed error/certainty taxonomy, strict `j1:<action>:<opaque-token>` callback grammar, security policies, and provider-free ports.
+- `src/dztgbot/services/`: pure workflow, connectivity, intake, callback authorization, submission/reconciliation, attachment, resource-limit, and observability services.
+- `src/dztgbot/infrastructure/persistence/`: versioned SQLite WAL repository for drafts, callback hashes, attempts, attachments, published issues, expiry, and atomic current+1 revision CAS.
+- `src/dztgbot/infrastructure/jira_gateway.py`: one lifecycle-managed `httpx.AsyncClient`, request-local PAT headers, canonical payload/diff/hash mapping, bounded timeouts/errors, metadata caching, and no blind create retry.
+- `src/dztgbot/infrastructure/gemini_gateway.py`: strict structured DTOs, prompt budgets, total deadlines, bounded fallback, rate-limit classification, and no unsupported media bytes.
+- `src/dztgbot/infrastructure/keyed_processor.py`: workflow/collection keyed serialization with bounded admission and validated concurrency-one fallback.
+- `src/dztgbot/ui/`: HTML-safe renderers, strict bound keyboards, and thin private handlers using parse -> service -> I/O -> service -> render.
+- `src/dztgbot/__main__.py`: sole composition root, PTB update processor, handler/command registration, resource-limit/metrics wiring, and deterministic reverse-order teardown.
+- `src/dztgbot/user_store.py`: PAT-only copy-on-write credential storage with schema/size/regular-file validation, mode `0600`, corruption quarantine, and previous-copy recovery.
+- `src/dztgbot/jira_auth.py` and `admin.py`: three-minute PAT-only private auth, optional allowlist enforcement, honest local logout, and private numeric-ID-restricted administration.
+- `src/dztgbot/rules.py`: bounded signature-cached rules with atomic update and last-known-good recovery.
+- `src/dztgbot/core.py`, `analysis.py`, and `jira_client.py`: non-authoritative compatibility facades only; they own no workflow state.
+- `scripts/deploy.sh` and `deploy/systemd/dztgbot.service`: Ubuntu 24.04-only deployment, protected local workflow DB preflight/backup/migration, non-root runtime, root-owned secrets, and narrow optional VPN controls.
+- `pyproject.toml`, `requirements-dev.txt`, and `.github/workflows/quality.yml`: pinned quality stack with Ruff, strict mypy, focused branch coverage, ShellCheck, and offline CI.
+
+Dependency direction is `ui -> services -> domain`; infrastructure implements ports and the composition root injects adapters. Domain/services import no Telegram or provider SDK types. SQLite is the only workflow authority.
 
 ## Settled decisions
 
-- Multi-agent remediation plan finalized in `MASTER_PLAN.md`.
-- Use `python-telegram-bot` 22.8 for its async polling API.
-- Require per-user authentication for Jira access: users send their Jira Personal Access Token (PAT) via `/auth` in private chat; PATs are deleted from chat history and stored locally with copy-on-write and mode 0600 permissions.
-- Basic authentication (passwords) and browser session cookies are rejected. Auth conversations expire after 3 minutes and warn on message deletion failure.
-- Explicit human approval required before issue creation: previews present inline `[✅ Create Issue]` and `[❌ Cancel]` buttons; issues are created only upon user confirmation.
-- Connect to Jira Server / Data Center REST API v2 using Bearer auth (PAT).
-- Workflow, callback, attempt, attachment, and published issue state are persisted in a local-disk SQLite database using WAL mode outside the Git checkout.
-- Callback data uses the strict schema `j1:<action>:<opaque_token>` containing 128 bits of randomness. Only SHA-256 token hashes are stored in SQLite.
-- Ambiguous create timeouts transition drafts to `SUBMISSION_UNKNOWN` state. Automatic re-creation is forbidden and requires human reconciliation.
-- Keep all server secrets in environment variables or an ignored `.env`/protected systemd environment file.
-- Use NetworkManager L2TP/IPsec because the supplied VPN server setup cannot use WireGuard.
-- Map the private Windows VPN profile only through the tracked placeholder `.nmconnection` template; never commit or quote the private XML or resulting profile.
-- Log to journald without forwarded text, generated descriptions, tokens, provider error text, VPN endpoints, or credentials.
-- Synchronize durable AI context through ordinary Git commits. Never store chat history or secrets as continuity data.
+- Use `python-telegram-bot` 22.8 async polling without a web server.
+- Use Jira PAT-only Bearer authentication. Passwords, Basic auth, and session cookies are rejected.
+- Keep authentication, workflows, callbacks, Jira mutations, and admin commands private-chat-only for the first release.
+- Persist workflow state in a protected local SQLite WAL database outside Git, synchronized folders, and network filesystems.
+- Store callback token hashes only. Tokens contain at least 128 bits of cryptographic randomness and bind exact workflow authorization context.
+- Treat a dispatched Jira create/update with unknown outcome as reconciliation-required and never automatically retry it.
+- Require atomic current+1 revision CAS for existing aggregate changes; same/stale/skipped revisions fail closed.
+- Keep a single shared Jira transport with request-local credentials and bounded concurrency.
+- Keep Gemini text-only for the first release; unsupported media bytes are not sent to the model.
+- Keep NetworkManager L2TP/IPsec because the supplied server is incompatible with WireGuard.
+- Keep credentials under host confinement and mode `0600`; encryption is deferred until a separately approved root-managed key lifecycle and vetted AEAD/rotation/backup/rollback design exists.
+- Keep all live validation separately authorized and supervised.
 
 ## Required private inputs
 
@@ -44,27 +46,32 @@ These names may be documented, but their values must never be written to tracked
 
 - `TELEGRAM_BOT_TOKEN`
 - `GEMINI_API_KEY`
-- `GEMINI_MODEL`
 - `TELEGRAM_ADMIN_USER_IDS`
-- approved Jira task rules
-- approved Gemini system instruction and analysis prompt
-- when VPN is enabled: private NetworkManager profile, local connection name, endpoint, username, password, and IPsec key
-- deployment-specific service account, checkout location, and protected environment-file location
+- optional `TELEGRAM_ALLOWED_USER_IDS`
+- approved Jira task rules and Gemini prompts
+- per-user Jira PATs
+- when VPN is enabled: private NetworkManager profile, connection name, endpoint, username, password, and IPsec key
+- deployment-specific service account, checkout location, protected environment path, workflow DB path, backup location, and custom CA path
 
 ## Evidence boundaries
 
-- 212/212 offline unit tests pass in 0.858s.
-- Syntactical compilation and type consistency verified across domain, infrastructure persistence, and application service modules.
-- Real Telegram, Gemini, Jira, VPN, systemd, and server behavior require fresh validation in the target environment.
-- Authenticated sessions, credentials, server configuration, and external runtime state do not transfer through Git.
+- Offline suite: 449 tests run; 448 passed and one Windows-only `O_NOFOLLOW` skip.
+- Ruff, strict mypy on 29 gated files, `pip check`, compilation, Git-Bash deploy syntax, and diff checks pass.
+- Focused branch coverage is 91% for FSM/callback/security and 77% for repository/submission.
+- Recovery/concurrency/resource matrix passed 132/132 repeated executions.
+- ShellCheck is configured in Ubuntu 24.04 CI but was unavailable locally.
+- Real Telegram, Gemini, Jira, VPN, systemd, Ubuntu deployment, target DB operations, and server behavior remain unverified.
+- The service remains pilot-only pending supervised target-environment validation.
 
 ## Durable context model
 
-- `PROJECT_CONTEXT.md`: stable facts and decisions.
-- `CONTINUE_HERE.md`: authoritative detailed checkpoint and next action.
-- `HANDOFF.md`: concise snapshot refreshed before switching.
+- `PROJECT_CONTEXT.md`: stable architecture, decisions, private-input names, and evidence boundaries.
+- `CONTINUE_HERE.md`: exact checkpoint and one concrete next action.
+- `HANDOFF.md`: concise operational snapshot refreshed before switching.
 - `AGENTS.md`: command and safety contract.
-- `MASTER_PLAN.md`: multi-agent execution master plan and milestone exit criteria.
-- `plan_antigravity.md`, `plan_codex.md`, `plan_grok.md`: domain-specific architecture, quality, and security proposals.
-- `docs/architecture/`: system architecture contracts, layer dependency rules, and provider boundaries.
-- `docs/reviews/telegram-bot-end-to-end-review-2026-08-07.md`: decision-grade workflow review.
+- `MASTER_PLAN.md`: completed multi-agent remediation specification and exit gates.
+- `docs/architecture/`: contracts, implemented architecture, provider boundaries, and migration record.
+- `docs/operations/workflow-db-runbook.md`: target DB operations and recovery.
+- `docs/security/credential-threat-model.md`: selected credential boundary and encryption deferral.
+- `docs/reviews/*verification.md`: aligned Phase 9 architecture, performance/recovery, and security evidence.
+- `docs/reviews/telegram-bot-end-to-end-review-2026-08-07.md`: original audit whose findings are mapped in current documentation and tests.

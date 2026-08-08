@@ -434,24 +434,21 @@ class IntakeService:
 
         with_template = replace(
             current,
+            state=DraftState.REVIEW,
+            revision=current.revision + 1,
             template=template,
             updated_at=self._clock.now(),
             last_error=None,
         )
         try:
             await self._repository.save(with_template)
-            ready = await self._repository.compare_and_swap_state(
-                with_template.draft_id,
-                with_template.revision,
-                DraftState.REVIEW,
-            )
         except DomainError:
             latest = await self._repository.get_by_id(with_template.draft_id)
             return latest if latest is not None else with_template
 
         if self._on_draft_ready is not None:
-            await self._on_draft_ready(ready)
-        return ready
+            await self._on_draft_ready(with_template)
+        return with_template
 
     async def _mark_analysis_failed(self, analyzing: Draft) -> Draft:
         try:

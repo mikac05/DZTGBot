@@ -7,6 +7,10 @@ readonly SERVICE_NAME="dztgbot.service"
 readonly UNIT_DESTINATION="/etc/systemd/system/${SERVICE_NAME}"
 readonly STATE_ROOT="/var/lib/dztgbot"
 readonly SUDOERS_DESTINATION="/etc/sudoers.d/dztgbot-vpn"
+# Minimum free space on the state filesystem before install/migrate (KiB).
+readonly MIN_STATE_FREE_KIB=262144
+# Bounded wait for systemd active state after start/restart.
+readonly SERVICE_ACTIVE_WAIT_SECONDS=20
 
 log() {
     printf '[dztgbot-deploy] %s\n' "$*"
@@ -48,6 +52,17 @@ require_root_managed_parent() {
     if (( (8#$mode & 8#022) != 0 )); then
         die "The parent directory for ${label} must not be writable by group or other users."
     fi
+}
+
+path_looks_synced_or_network() {
+    local value
+    value="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$value" in
+        *onedrive*|*dropbox*|*google\ drive*|*googledrive*|*icloud*|*nextcloud*)
+            return 0
+            ;;
+    esac
+    return 1
 }
 
 normalize_bool() {
@@ -150,6 +165,8 @@ prepare_environment_file() {
         install -o root -g root -m 0600 "$PROJECT_DIR/.env.example" "$DZTGBOT_ENV_FILE"
         log "Created a protected placeholder environment file."
         log "Edit it in place with sudoedit, replace required TODO values, then run this script again."
+        log "Required keys include WORKFLOW_DB_PATH under ${STATE_ROOT} (for example ${STATE_ROOT}/workflow.sqlite3)."
+        log "GEMINI_MODEL is not used by the application and is not required."
         exit 2
     fi
 
@@ -158,9 +175,24 @@ prepare_environment_file() {
     [[ "$(stat -c '%a' "$DZTGBOT_ENV_FILE")" == "600" ]] || die "The environment file permissions must be exactly 0600."
 }
 
+validate_optional_true_invariant() {
+    local key="$1"
+    local raw
+    raw="$(env_value "$key")"
+    if [[ -z "$raw" ]]; then
+        return
+    fi
+    local normalized
+    normalized="$(normalize_bool "$raw")" || die "${key} must be true or false."
+    if [[ "$normalized" != "true" ]]; then
+        die "${key} cannot be false; the first release hard-enforces this invariant."
+    fi
+}
+
 validate_environment() {
     local key
-    for key in TELEGRAM_BOT_TOKEN GEMINI_API_KEY GEMINI_MODEL TELEGRAM_ADMIN_USER_IDS JIRA_RULES_PATH JIRA_URL; do
+    # GEMINI_MODEL is intentionally absent: model selection is application-managed.
+    for key in TELEGRAM_BOT_TOKEN GEMINI_API_KEY TELEGRAM_ADMIN_USER_IDS JIRA_RULES_PATH JIRA_URL WORKFLOW_DB_PATH; do
         require_configured_value "$key"
     done
 
@@ -176,10 +208,47 @@ validate_environment() {
         die "TELEGRAM_CONCURRENT_UPDATES must be between 1 and 32."
     fi
 
+    # First-release security invariants when present in the environment file.
+    validate_optional_true_invariant "AUTH_PAT_ONLY"
+    validate_optional_true_invariant "PRIVATE_CHAT_ONLY"
+
     JIRA_RULES_PATH="$(env_value JIRA_RULES_PATH)"
     require_safe_absolute_path "JIRA_RULES_PATH" "$JIRA_RULES_PATH"
     [[ "$(dirname -- "$JIRA_RULES_PATH")" == "$STATE_ROOT" ]] || \
         die "JIRA_RULES_PATH must be a direct child of ${STATE_ROOT} so systemd can grant narrowly scoped write access."
+
+    WORKFLOW_DB_PATH="$(env_value WORKFLOW_DB_PATH)"
+    require_safe_absolute_path "WORKFLOW_DB_PATH" "$WORKFLOW_DB_PATH"
+    [[ "$(dirname -- "$WORKFLOW_DB_PATH")" == "$STATE_ROOT" ]] || \
+        die "WORKFLOW_DB_PATH must be a direct child of ${STATE_ROOT} (for example ${STATE_ROOT}/workflow.sqlite3)."
+    if [[ "$WORKFLOW_DB_PATH" == "$PROJECT_DIR"/* ]]; then
+        die "WORKFLOW_DB_PATH must be outside the project checkout."
+    fi
+    if path_looks_synced_or_network "$WORKFLOW_DB_PATH"; then
+        die "WORKFLOW_DB_PATH must not reside on cloud-synced or network-storage path markers."
+    fi
+    if [[ -L "$WORKFLOW_DB_PATH" ]]; then
+        die "WORKFLOW_DB_PATH must not be a symbolic link."
+    fi
+
+    USER_CREDENTIALS_PATH="$(env_value USER_CREDENTIALS_PATH)"
+    if [[ -n "$USER_CREDENTIALS_PATH" && "$USER_CREDENTIALS_PATH" != TODO_* ]]; then
+        require_safe_absolute_path "USER_CREDENTIALS_PATH" "$USER_CREDENTIALS_PATH"
+        [[ "$(dirname -- "$USER_CREDENTIALS_PATH")" == "$STATE_ROOT" ]] || \
+            die "USER_CREDENTIALS_PATH must be a direct child of ${STATE_ROOT} when configured."
+        if [[ "$USER_CREDENTIALS_PATH" == "$PROJECT_DIR"/* ]]; then
+            die "USER_CREDENTIALS_PATH must be outside the project checkout."
+        fi
+    else
+        USER_CREDENTIALS_PATH="${STATE_ROOT}/user_credentials.json"
+    fi
+
+    local jira_url
+    jira_url="$(env_value JIRA_URL)"
+    [[ "$jira_url" == https://* ]] || die "JIRA_URL must use the https scheme."
+    case "$jira_url" in
+        *@*|*"?"*|*"#"*) die "JIRA_URL must not contain credentials, query strings, or fragments." ;;
+    esac
 
     local raw_vpn_enabled raw_vpn_allow_start
     raw_vpn_enabled="$(env_value VPN_ENABLED)"
@@ -279,6 +348,22 @@ ensure_service_account() {
     SERVICE_GROUP="$(id -gn "$DZTGBOT_SERVICE_USER")"
 }
 
+ensure_state_disk_space() {
+    local target="$1"
+    local free_kib
+    if ! free_kib="$(df -Pk -- "$target" 2>/dev/null | awk 'NR==2 {print $4}')"; then
+        die "Unable to measure free disk space for ${target}."
+    fi
+    [[ "$free_kib" =~ ^[0-9]+$ ]] || die "Unable to parse free disk space for ${target}."
+    if (( free_kib < MIN_STATE_FREE_KIB )); then
+        die "Insufficient free disk space under ${target}: need at least ${MIN_STATE_FREE_KIB} KiB, found ${free_kib} KiB."
+    fi
+    if ! touch -- "${target}/.dztgbot-write-probe" 2>/dev/null; then
+        die "State directory ${target} is not writable (read-only filesystem or permissions failure)."
+    fi
+    rm -f -- "${target}/.dztgbot-write-probe"
+}
+
 build_virtual_environment() {
     local python_candidate="${DZTGBOT_PYTHON_BIN:-}"
     if [[ -z "$python_candidate" ]]; then
@@ -293,9 +378,12 @@ build_virtual_environment() {
     [[ ! -L "$VENV_DIR" ]] || die "The virtual-environment path must not be a symbolic link."
     [[ ! -e "$VENV_DIR" || -d "$VENV_DIR" ]] || die "The virtual-environment path must be a directory."
     "$python_candidate" -m venv "$VENV_DIR"
+    # Runtime install only. Quality tools (ruff/mypy/coverage/ShellCheck) belong to
+    # requirements-dev.txt and the offline CI workflow — not the production venv.
     "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check -r "$PROJECT_DIR/requirements.txt"
     "$VENV_DIR/bin/python" -m pip check
     PYTHONPATH="$PROJECT_DIR/src:$PROJECT_DIR" "$VENV_DIR/bin/python" -m compileall -q "$PROJECT_DIR/src"
+    # Offline unit suite only. Never contacts Telegram, Gemini, Jira, VPN, or systemd.
     PYTHONPATH="$PROJECT_DIR/src:$PROJECT_DIR" "$VENV_DIR/bin/python" -m unittest discover -s "$PROJECT_DIR/tests" -v
 
     chown -R "root:$SERVICE_GROUP" "$VENV_DIR"
@@ -315,6 +403,7 @@ prepare_rules() {
     [[ ! -L "$STATE_ROOT" ]] || die "The application state directory must not be a symbolic link."
     [[ ! -e "$STATE_ROOT" || -d "$STATE_ROOT" ]] || die "The application state path must be a directory."
     install -d -o "$DZTGBOT_SERVICE_USER" -g "$SERVICE_GROUP" -m 0700 "$STATE_ROOT"
+    ensure_state_disk_space "$STATE_ROOT"
 
     if [[ ! -e "$JIRA_RULES_PATH" ]]; then
         install -o "$DZTGBOT_SERVICE_USER" -g "$SERVICE_GROUP" -m 0600 "$PROJECT_DIR/config/jira_rules.example.txt" "$JIRA_RULES_PATH"
@@ -324,6 +413,148 @@ prepare_rules() {
     [[ -s "$JIRA_RULES_PATH" ]] || die "The runtime Jira rules file must not be empty."
     chown "$DZTGBOT_SERVICE_USER:$SERVICE_GROUP" "$JIRA_RULES_PATH"
     chmod 0600 "$JIRA_RULES_PATH"
+}
+
+stop_service_if_running() {
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        log "Stopping ${SERVICE_NAME} before workflow-database maintenance."
+        systemctl stop "$SERVICE_NAME"
+    fi
+}
+
+backup_existing_workflow_database() {
+    local source_db="$1"
+    local backup_dir="${STATE_ROOT}/backups"
+    local stamp backup_path
+    install -d -o "$DZTGBOT_SERVICE_USER" -g "$SERVICE_GROUP" -m 0700 "$backup_dir"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    backup_path="${backup_dir}/workflow-${stamp}.sqlite3"
+
+    # Online-safe SQLite backup API (service is already stopped for deploy).
+    if ! sudo -u "$DZTGBOT_SERVICE_USER" "$VENV_DIR/bin/python" - "$source_db" "$backup_path" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+if not src.is_file():
+    raise SystemExit("source database missing")
+source = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+try:
+    destination = sqlite3.connect(dst)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+finally:
+    source.close()
+print(f"backup_ok path={dst.name}")
+PY
+    then
+        die "Workflow database backup failed. Resolve the failure before migration."
+    fi
+
+    chown "$DZTGBOT_SERVICE_USER:$SERVICE_GROUP" "$backup_path"
+    chmod 0600 "$backup_path"
+    log "Created workflow database backup under ${backup_dir}."
+}
+
+verify_workflow_integrity() {
+    local db_path="$1"
+    local result
+    result="$(sudo -u "$DZTGBOT_SERVICE_USER" "$VENV_DIR/bin/python" - "$db_path" <<'PY'
+import sqlite3
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+try:
+    row = connection.execute("PRAGMA integrity_check").fetchone()
+finally:
+    connection.close()
+print(row[0] if row else "failed")
+PY
+)" || die "Workflow database integrity check could not run."
+    [[ "$result" == "ok" ]] || die "Workflow database integrity check failed (${result}). Restore from a known-good backup before continuing."
+}
+
+prepare_workflow_database() {
+    # Protected local SQLite outside checkout/sync/network storage.
+    require_safe_absolute_path "WORKFLOW_DB_PATH" "$WORKFLOW_DB_PATH"
+    [[ "$(dirname -- "$WORKFLOW_DB_PATH")" == "$STATE_ROOT" ]] || \
+        die "WORKFLOW_DB_PATH must remain a direct child of ${STATE_ROOT}."
+
+    install -d -o "$DZTGBOT_SERVICE_USER" -g "$SERVICE_GROUP" -m 0700 "$STATE_ROOT"
+    install -d -o "$DZTGBOT_SERVICE_USER" -g "$SERVICE_GROUP" -m 0700 "${STATE_ROOT}/backups"
+    ensure_state_disk_space "$STATE_ROOT"
+
+    if [[ -e "$WORKFLOW_DB_PATH" ]]; then
+        [[ ! -L "$WORKFLOW_DB_PATH" ]] || die "WORKFLOW_DB_PATH must not be a symbolic link."
+        [[ -f "$WORKFLOW_DB_PATH" ]] || die "WORKFLOW_DB_PATH must be a regular file when present."
+        chown "$DZTGBOT_SERVICE_USER:$SERVICE_GROUP" "$WORKFLOW_DB_PATH"
+        chmod 0600 "$WORKFLOW_DB_PATH"
+        verify_workflow_integrity "$WORKFLOW_DB_PATH"
+        backup_existing_workflow_database "$WORKFLOW_DB_PATH"
+    fi
+
+    # Migration preflight: open repository as the service account, apply schema, report version.
+    # This never contacts Telegram, Gemini, Jira, or NetworkManager.
+    if ! sudo -u "$DZTGBOT_SERVICE_USER" \
+        env "WORKFLOW_DB_PATH=${WORKFLOW_DB_PATH}" \
+        "PYTHONPATH=${PROJECT_DIR}/src" \
+        "$VENV_DIR/bin/python" - <<'PY'
+import asyncio
+import os
+from pathlib import Path
+
+from dztgbot.infrastructure.persistence.workflow_sqlite import (
+    LATEST_SCHEMA_VERSION,
+    SQLiteWorkflowRepository,
+)
+
+async def main() -> None:
+    path = Path(os.environ["WORKFLOW_DB_PATH"])
+    repository = SQLiteWorkflowRepository(path)
+    await repository.initialize()
+    version = await repository.schema_version()
+    await repository.close()
+    if version != LATEST_SCHEMA_VERSION:
+        raise SystemExit(f"unexpected schema version {version}")
+    print(f"workflow_migration_preflight_ok schema_version={version}")
+
+asyncio.run(main())
+PY
+    then
+        die "Workflow database migration preflight failed. See docs/operations/workflow-db-runbook.md."
+    fi
+
+    [[ -f "$WORKFLOW_DB_PATH" && ! -L "$WORKFLOW_DB_PATH" ]] || die "Workflow database was not created as a regular file."
+    chown "$DZTGBOT_SERVICE_USER:$SERVICE_GROUP" "$WORKFLOW_DB_PATH"
+    chmod 0600 "$WORKFLOW_DB_PATH"
+
+    # Companion WAL/SHM files, when present, stay service-owned and non-world-readable.
+    local companion
+    for companion in "${WORKFLOW_DB_PATH}-wal" "${WORKFLOW_DB_PATH}-shm" "${WORKFLOW_DB_PATH}-journal"; do
+        if [[ -e "$companion" ]]; then
+            chown "$DZTGBOT_SERVICE_USER:$SERVICE_GROUP" "$companion"
+            chmod 0600 "$companion"
+        fi
+    done
+
+    sudo -u "$DZTGBOT_SERVICE_USER" test -r "$WORKFLOW_DB_PATH" || die "The service account cannot read WORKFLOW_DB_PATH."
+    sudo -u "$DZTGBOT_SERVICE_USER" test -w "$WORKFLOW_DB_PATH" || die "The service account cannot write WORKFLOW_DB_PATH."
+
+    # Credentials store lives beside rules by default; ensure parent permissions only.
+    if [[ -e "$USER_CREDENTIALS_PATH" ]]; then
+        [[ ! -L "$USER_CREDENTIALS_PATH" ]] || die "USER_CREDENTIALS_PATH must not be a symbolic link."
+        [[ -f "$USER_CREDENTIALS_PATH" ]] || die "USER_CREDENTIALS_PATH must be a regular file when present."
+        chown "$DZTGBOT_SERVICE_USER:$SERVICE_GROUP" "$USER_CREDENTIALS_PATH"
+        chmod 0600 "$USER_CREDENTIALS_PATH"
+    fi
+
+    log "Workflow database path prepared with service ownership and mode 0600."
 }
 
 configure_vpn_sudoers() {
@@ -387,15 +618,32 @@ install_systemd_unit() {
 
 start_service() {
     systemctl enable "$SERVICE_NAME"
+    systemctl reset-failed "$SERVICE_NAME" 2>/dev/null || true
+
     if systemctl is-active --quiet "$SERVICE_NAME"; then
+        log "Restarting active ${SERVICE_NAME}."
         systemctl restart "$SERVICE_NAME"
     else
+        log "Starting ${SERVICE_NAME}."
         systemctl start "$SERVICE_NAME"
     fi
-    if ! systemctl is-active --quiet "$SERVICE_NAME"; then
-        journalctl -u "$SERVICE_NAME" -n 50 --no-pager >&2 || true
-        die "The bot did not reach the active state."
-    fi
+
+    local waited=0
+    while (( waited < SERVICE_ACTIVE_WAIT_SECONDS )); do
+        if systemctl is-active --quiet "$SERVICE_NAME"; then
+            log "${SERVICE_NAME} is active after ${waited}s."
+            return
+        fi
+        # Fail fast on permanent failure states rather than waiting the full window.
+        if systemctl is-failed --quiet "$SERVICE_NAME"; then
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    journalctl -u "$SERVICE_NAME" -n 50 --no-pager >&2 || true
+    die "The bot did not reach the active state within ${SERVICE_ACTIVE_WAIT_SECONDS}s. See docs/operations/workflow-db-runbook.md for recovery."
 }
 
 main() {
@@ -418,8 +666,11 @@ main() {
     validate_environment
     install_base_packages
     ensure_service_account
+    # Stop before replacing the virtualenv and migrating durable state so restart is deterministic.
+    stop_service_if_running
     build_virtual_environment
     prepare_rules
+    prepare_workflow_database
     install_vpn_packages
     configure_vpn_sudoers
     install_systemd_unit
@@ -427,7 +678,10 @@ main() {
 
     log "Deployment completed and ${SERVICE_NAME} is active."
     log "View logs with: journalctl -u ${SERVICE_NAME} -f"
-    log "Run the Phase 6 Telegram test plan before treating this release as production-ready."
+    log "Workflow DB runbook: docs/operations/workflow-db-runbook.md"
+    log "Credential threat model: docs/security/credential-threat-model.md"
+    log "Complete the supervised end-to-end plan before treating this release as production-ready."
+    log "This installer never mutates Jira, never starts a full VPN tunnel automatically, and never loads live secrets into the repository."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
