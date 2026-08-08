@@ -18,10 +18,15 @@ Success for the completed program includes clean domain isolation, explicit FSM 
   - Background Unread Notification Poller (`NotificationPollerService`) running every 300s (5 min) with SQLite schema v4 tracker.
   - Executive Daily Standup Summary Report (`/standup`) grouping tickets into Blocked, In Progress, In QA/Review, and Recently Done.
   - Zero-effort Figma URL auto-detection from description & dynamic `[🎨 Figma Spec ↗]` button placement.
+  - Multi-language Bot UI (🇹🇼 繁體中文, 🇺🇸 English, 🇨🇳 简体中文) with persistent user language preferences via `/start` & `/language`.
+  - Mandatory Simplified Chinese (简体中文) output enforcement for AI auto-generated issue summary & description.
+  - Optional Basic Auth switch (`AUTH_PAT_ONLY=false`) with isolated modular compatibility block.
+  - Reorganized best-practice documentation hierarchy with master index (`docs/README.md`).
 
 ## Decisions
 
-- First safe release remains private-chat-only and PAT-only.
+- First safe release remains private-chat-only with optional PAT or Basic Auth capability (`AUTH_PAT_ONLY`).
+- AI auto-generated Jira issue summary and description are strictly generated in Simplified Chinese (简体中文) for team consistency.
 - SQLite on a protected local runtime filesystem is the sole workflow/callback/attempt/attachment/published authority (schema v4).
 - Existing aggregates update only through atomic current-revision-plus-one CAS; same, stale, skipped, or concurrent-loser revisions fail closed.
 - Jira create unknown outcomes never blind-retry and require positive reconciliation.
@@ -44,9 +49,9 @@ Keep the service pilot-only. With explicit target-environment authorization, exe
 
 ## Verification
 
-- Full offline suite: **466 tests run; 465 passed, 1 Windows-only platform skip**.
+- Full offline suite: **472 tests run; 471 passed, 1 Windows-only platform skip**.
 - Ruff: passed (`All checks passed!`).
-- Strict mypy: passed for all source files (`Success: no issues found in 34 source files`).
+- Strict mypy: passed for all source files (`Success: no issues found in 35 source files`).
 - `pip check`, compilation, Git-Bash deploy syntax, and diff checks passed.
 - Focused branch coverage: **91%** for FSM/callback/security and **77%** for repository/submission.
 - Recovery/concurrency/resource matrix: 44 tests repeated three times, all 132 executions passed.
@@ -54,10 +59,10 @@ Keep the service pilot-only. With explicit target-environment authorization, exe
 ## Git snapshot metadata
 
 <!-- HANDOFF-METADATA:START -->
-- Generated UTC: `2026-08-08T16:39:12Z`
+- Generated UTC: `2026-08-08T16:40:28Z`
 - Branch: `main`
 - Upstream: `origin/main`
-- Base commit before this handoff: `6d5d97f2065a`
-- Working-tree entries before metadata refresh: `6`
+- Base commit before this handoff: `0282328e7254`
+- Working-tree entries before metadata refresh: `2`
 - The handoff commit is the commit containing this file.
 <!-- HANDOFF-METADATA:END -->

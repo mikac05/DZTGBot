@@ -19,6 +19,10 @@ Implemented and offline-verified:
 - Executive Daily Standup Summary Report (`/standup`) grouping tickets into Blocked, In Progress, In QA/Review, and Recently Done;
 - Background Unread Notification Poller (`NotificationPollerService`) with 300s (5 min) interval;
 - Figma URL auto-detection in description & dynamic `[🎨 Figma Spec ↗]` button placement;
+- multi-language UI support (🇹🇼 繁體中文, 🇺🇸 English, 🇨🇳 简体中文) via `/start`, `/language`, and `[🌐 語言設置]`;
+- mandatory Simplified Chinese (简体中文) enforcement for AI auto-generated issue summary & description;
+- optional Basic Auth switch (`AUTH_PAT_ONLY=false`) with isolated modular compatibility;
+- reorganized best-practice documentation hierarchy and master index (`docs/README.md`);
 - composition-root cutover with no legacy workflow authority or raw unowned tasks;
 - keyed processing, global/per-actor resource bounds, deadlines, retry budgets, cooldown recovery, and privacy-safe metrics;
 - reproducible Ruff, strict mypy, branch coverage, unit, dependency, compilation, and Ubuntu CI gates;
@@ -26,9 +30,9 @@ Implemented and offline-verified:
 
 ## Required verification on resume
 
-- Full suite: **466 tests run; 465 passed and 1 Windows-only platform skip**.
+- Full suite: **472 tests run; 471 passed and 1 Windows-only platform skip**.
 - Ruff: passed (`All checks passed!`).
-- Strict mypy: passed for all source files (`Success: no issues found in 34 source files`).
+- Strict mypy: passed for all source files (`Success: no issues found in 35 source files`).
 - `pip check`: passed.
 - Source/test compilation: passed.
 - Git-Bash `bash -n scripts/deploy.sh`: passed.
